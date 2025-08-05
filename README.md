@@ -1,2 +1,2 @@
-# 2025-hackaton-8-Dasiro-backend
+# 2025-hackathon-8-Dasiro-backend
 2025 동국대 멋쟁이사자처럼 중앙해커톤 '땅속추적단' 백엔드 레포지토리 입니다.
