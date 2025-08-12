@@ -44,6 +44,12 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     
     'dasiro',
+    'incidents',
+    'places',
+    'coupons',
+    'districts',
+    'routes',
+    'reports',
     
     'corsheaders',
 ]
