@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     'routes',
     'reports',
     
+    'rest_framework',
     'corsheaders',
 ]
 
