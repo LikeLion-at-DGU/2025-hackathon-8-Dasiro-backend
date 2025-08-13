@@ -28,6 +28,7 @@ SECRET_KEY = env('SECRET_KEY')
 
 DEBUG = env('DEBUG')
 
+# kakao 키 추가
 KAKAO_REST_KEY = env('KAKAO_REST_KEY')
 KAKAO_API_BASE = env('KAKAO_API_BASE', default='https://apis-navi.kakaomobility.com')
 KAKAO_LOCAL_BASE = env('KAKAO_LOCAL_BASE', default='https://dapi.kakao.com')
