@@ -24,11 +24,14 @@ environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env('SECRET_KEY')
 
-# SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env('DEBUG')
+
+KAKAO_REST_KEY = env('KAKAO_REST_KEY')
+KAKAO_API_BASE = env('KAKAO_API_BASE', default='https://apis-navi.kakaomobility.com')
+KAKAO_LOCAL_BASE = env('KAKAO_LOCAL_BASE', default='https://dapi.kakao.com')
+KAKAO_TIMEOUT = env.int('KAKAO_TIMEOUT', default=8)
 
 ALLOWED_HOSTS = ['*']
 
@@ -132,8 +135,6 @@ USE_TZ = False
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
-
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
@@ -146,7 +147,7 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 CORS_ALLOW_ALL_ORIGINS = False
-CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_CREDENTIALS = False
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
