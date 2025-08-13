@@ -1,14 +1,22 @@
 from rest_framework import serializers
-from .models import RecoveryIncident, RecoveryIncidentImage
+from .models import *
+
+class RecoveryIncidentListSerializer(serializers.ModelSerializer):
+    images_count = serializers.IntegerField()
+    distance_m = serializers.IntegerField(required=False, allow_null=True)
+
+    class Meta:
+        model = RecoveryIncident
+        fields = ['id', 'occurred_at', 'address', 'lat', 'lng', 'cause', 'method', 'status', 'images_count', 'distance_m']
 
 class RecoveryIncidentImageSerializer(serializers.ModelSerializer):
     class Meta:
         model = RecoveryIncidentImage
-        fields = '__all__'
+        fields = ['id', 'image_url', 'created_at']
 
-class RecoveryIncidentSerializer(serializers.ModelSerializer):
-    images = RecoveryIncidentImageSerializer(many=True, read_only=True)
+class RecoveryIncidentDetailSerializer(serializers.ModelSerializer):
+    images = RecoveryIncidentImageSerializer(many=True)
 
     class Meta:
         model = RecoveryIncident
-        fields = '__all__'
+        fields = ['id', 'occurred_at', 'address', 'lat', 'lng', 'cause', 'method', 'status', 'images', 'note']
