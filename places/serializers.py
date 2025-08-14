@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Place, PlaceIncidentProximity
+from .models import *
 
 class PlaceSerializer(serializers.ModelSerializer):
     class Meta:

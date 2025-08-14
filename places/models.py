@@ -13,7 +13,10 @@ class Place(models.Model):
     address = models.CharField(max_length=255)
     lat = models.DecimalField(max_digits=10, decimal_places=7)
     lng = models.DecimalField(max_digits=10, decimal_places=7)
+
+    # 상권 대표 이미지, 복구완료에서 사용. 사고 사진이랑 분리(대표 이미지 1장)
     main_image_url = models.TextField(blank=True, null=True)
+
     kakao_place_id = models.CharField(max_length=64, blank=True, null=True)
     kakao_url = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
