@@ -1,13 +1,11 @@
 from django.shortcuts import get_object_or_404
-from django.db.models import Count, Value, FloatField, F
+from django.db.models import Value, FloatField, F
 from django.db.models.functions import ACos, Cos, Sin, Radians
-from rest_framework import viewsets
+from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework import status
-from .models import *
-from .serializers import *
-
+from .models import RecoveryIncident
+from .serializers import RecoveryIncidentListSerializer, RecoveryIncidentDetailSerializer
 
 class RecoveryIncidentViewSet(viewsets.ViewSet):
 
@@ -65,7 +63,7 @@ class RecoveryIncidentViewSet(viewsets.ViewSet):
         lng = request.GET.get("lng")
         radius = request.GET.get("radius")
 
-        queryset = RecoveryIncident.objects.annotate(images_count=Count("images"))
+        queryset = RecoveryIncident.objects.all()
 
         queryset, error = self._apply_status_filter(queryset, status_filter)
         if error:
@@ -82,19 +80,9 @@ class RecoveryIncidentViewSet(viewsets.ViewSet):
         })
 
     def retrieve(self, request, pk=None):
-        incident = get_object_or_404(RecoveryIncident.objects.prefetch_related("images"), id=pk)
+        incident = get_object_or_404(RecoveryIncident, id=pk)
         serializer = RecoveryIncidentDetailSerializer(incident)
         return self._api_response("success", "사고 상세 조회 성공", 200, serializer.data)
-
-    @action(detail=True, methods=["get"], url_path="images")
-    def images(self, request, pk=None):
-        incident = get_object_or_404(RecoveryIncident, id=pk)
-        images = incident.images.all()
-        serializer = RecoveryIncidentImageSerializer(images, many=True)
-        return self._api_response("success", "사고 이미지 조회 성공", 200, {
-            "items": serializer.data,
-            "count": images.count()
-        })
 
     @action(detail=False, methods=["get"], url_path="near")
     def near(self, request):
@@ -106,7 +94,7 @@ class RecoveryIncidentViewSet(viewsets.ViewSet):
         if not (lat and lng and radius):
             return self._api_response("error", "lat,lng,radius required", 400, {"detail": "lat,lng required"})
 
-        queryset = RecoveryIncident.objects.annotate(images_count=Count("images"))
+        queryset = RecoveryIncident.objects.all()
 
         queryset, error = self._apply_distance_filter(queryset, lat, lng, radius)
         if error:
