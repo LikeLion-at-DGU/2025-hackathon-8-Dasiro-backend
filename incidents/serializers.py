@@ -8,8 +8,7 @@ class RecoveryIncidentListSerializer(serializers.ModelSerializer):
         model = RecoveryIncident
         fields = [
             'id', 'occurred_at', 'address', 'lat', 'lng',
-            'cause', 'method', 'status', 'note', 'image_url',
-            'images_count', 'distance_m'
+            'cause', 'method', 'status', 'note', 'image_url', 'distance_m'
         ]
 
 class RecoveryIncidentDetailSerializer(serializers.ModelSerializer):
