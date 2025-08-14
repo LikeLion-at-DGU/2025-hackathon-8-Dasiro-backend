@@ -36,6 +36,17 @@ KAKAO_TIMEOUT = env.int('KAKAO_TIMEOUT', default=8)
 
 ALLOWED_HOSTS = ['*']
 
+# AWS S3 설정
+AWS_ACCESS_KEY_ID = env('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = env('AWS_SECRET_ACCESS_KEY')
+AWS_STORAGE_BUCKET_NAME = env('AWS_STORAGE_BUCKET_NAME')
+AWS_S3_REGION_NAME = env('AWS_S3_REGION_NAME', default='ap-northeast-2')
+AWS_S3_CUSTOM_DOMAIN = env('AWS_S3_CUSTOM_DOMAIN', default=f"{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com")
+
+# 기본 파일 스토리지 S3로 변경
+DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/"
+
 
 # Application definition
 
@@ -56,6 +67,8 @@ INSTALLED_APPS = [
     
     'rest_framework',
     'corsheaders',
+    
+    'storages',
 ]
 
 MIDDLEWARE = [
