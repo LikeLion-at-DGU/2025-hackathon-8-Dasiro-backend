@@ -236,3 +236,123 @@ class DistrictViewSet(viewsets.ViewSet):
             "code": 200,
             "data": {"items": data, "as_of_date": "2025-08-01", "count": len(data)}
         })
+        
+class SafezoneViewSet(viewsets.ViewSet):
+
+    def _latest_metrics(self): # 최신 스냅샷으로 변경 -> 최근 날짜것 불러오기 !
+        latest_date = DistrictMetric.objects.aggregate(latest=Max("as_of_date"))["latest"]
+        if not latest_date:
+            return None, None
+        qs = (
+            DistrictMetric.objects
+            .filter(as_of_date=latest_date)
+            .select_related("district")
+        )
+        return qs, latest_date
+
+    def _is_safe_district(self, metric: DistrictMetric):
+        return (metric.total_grade in ("G1", "G2")) or bool(metric.district.is_safezone)
+
+    @action(detail=False, methods=["get"], url_path="gu")
+    def gu_summary(self, request):
+        metrics, latest_date = self._latest_metrics()
+        if latest_date is None:
+            return Response({
+                "status": "error",
+                "message": "안심존 집계 실패",
+                "code": 500,
+                "data": {"detail": "metrics not prepared"}
+            }, status=500)
+
+        safe_gu_info = {}
+        for m in metrics:
+            if self._is_safe_district(m):
+                gu_code = int(str(m.district.id)[:5])
+                info = safe_gu_info.setdefault(gu_code, {"grades": set(), "manual": False})
+                if m.total_grade in ("G1", "G2"):
+                    info["grades"].add(m.total_grade)
+                if m.district.is_safezone:
+                    info["manual"] = True
+
+        results = []
+        for gu_code, info in safe_gu_info.items():
+            gu_districts = District.objects.filter(id__startswith=str(gu_code))
+            if not gu_districts.exists():
+                continue
+
+            avg_lat = sum(float(d.center_lat) for d in gu_districts) / gu_districts.count()
+            avg_lng = sum(float(d.center_lng) for d in gu_districts) / gu_districts.count()
+
+            if "G1" in info["grades"]:
+                final_grade = "G1"
+            elif "G2" in info["grades"] or info["manual"]:
+                final_grade = "G2"
+            else:
+                final_grade = "G2"
+
+            results.append({
+                "gu_code": gu_code,
+                "sido": gu_districts.first().sido,
+                "sigungu": gu_districts.first().sigungu,
+                "center_lat": round(avg_lat, 6),
+                "center_lng": round(avg_lng, 6),
+                "safe_district_count": gu_districts.count(),  # 구 전체 동 개수로 줌
+                "final_grade": final_grade,  # G1/G2 구분함 !
+            })
+
+        return Response({
+            "status": "success",
+            "message": "안심존(구) 조회 성공",
+            "code": 200,
+            "data": {"items": results, "as_of_date": str(latest_date), "count": len(results)}
+        })
+
+    @action(detail=False, methods=["get"], url_path="districts")
+    def safe_districts(self, request):
+        """
+        부동산 안심존 – 동 목록
+        GET /api/v1/safezones/districts
+        """
+        metrics, latest_date = self._latest_metrics()
+        if latest_date is None:
+            return Response({
+                "status": "error",
+                "message": "안심존 동 조회 실패",
+                "code": 500,
+                "data": {"detail": "metrics not prepared"}
+            }, status=500)
+
+        safe_items = []
+        seen_ids = set()
+
+        for m in metrics:
+            if self._is_safe_district(m):
+                safe_items.append({
+                    "id": m.district.id,
+                    "sido": m.district.sido,
+                    "sigungu": m.district.sigungu,
+                    "dong": m.district.dong,
+                    "center_lat": float(m.district.center_lat),
+                    "center_lng": float(m.district.center_lng),
+                    "total_grade": m.total_grade if m.total_grade in ("G1", "G2") else "G2"
+                })
+                seen_ids.add(m.district_id)
+
+        manual_safe = District.objects.filter(is_safezone=True).exclude(id__in=seen_ids)
+        for d in manual_safe:
+            safe_items.append({
+                "id": d.id,
+                "sido": d.sido,
+                "sigungu": d.sigungu,
+                "dong": d.dong,
+                "center_lat": float(d.center_lat),
+                "center_lng": float(d.center_lng),
+                "total_grade": "G2",
+            })
+
+        return Response({
+            "status": "success",
+            "message": "안심존(동) 조회 성공",
+            "code": 200,
+            "data": {"items": safe_items, "as_of_date": str(latest_date), "count": len(safe_items)}
+        })
