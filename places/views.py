@@ -1,163 +1,72 @@
-from django.db.models import F
+from rest_framework import viewsets, status
 from rest_framework.response import Response
-from rest_framework import viewsets
-from rest_framework.decorators import action
-from math import radians, sin, cos, acos
+from django.conf import settings
+import requests
 
 from incidents.models import RecoveryIncident
-from .models import Place, PlaceIncidentProximity
+from .utils import haversine
 
-CATEGORY_IMAGES = {
-    'FOOD': 'https://dasirobucket.s3.ap-northeast-2.amazonaws.com/food.png',
-    'CAFE': 'https://dasirobucket.s3.ap-northeast-2.amazonaws.com/cafe.png',
-    'CONVENIENCE': 'https://dasirobucket.s3.ap-northeast-2.amazonaws.com/convenience.png',
-    'OTHER': 'https://dasirobucket.s3.ap-northeast-2.amazonaws.com/other.png',
+
+CATEGORY_MAP = {
+    "음식점": "FD6",
+    "카페": "CE7",
+    "편의점": "CS2"
 }
 
-def api_response(status_str, message, code, data):
-    return Response(
-        {
-            "status": status_str,
-            "message": message,
-            "code": code,
-            "data": data
-        },
-        status=code
-    )
-
-def apply_default_images(qs):
-    for place in qs:
-        if not place.main_image_url:
-            place.main_image_url = CATEGORY_IMAGES.get(place.category)
-    return qs
-
-def calculate_distance(lat1, lng1, lat2, lng2):
-    R = 6371000  # meters
-    lat1, lng1, lat2, lng2 = map(radians, [lat1, lng1, lat2, lng2])
-    return R * acos(
-        cos(lat1) * cos(lat2) * cos(lng2 - lng1) + sin(lat1) * sin(lat2)
-    )
 
 class PlaceViewSet(viewsets.ViewSet):
+
     def list(self, request):
-        category = request.GET.get('category')
-        if category and category not in CATEGORY_IMAGES.keys():
-            return api_response(
-                "error",
-                "잘못된 카테고리",
-                400,
-                {"detail": f"category must be one of {','.join(CATEGORY_IMAGES.keys())}"}
-            )
+        category = request.query_params.get("category")  # 음식점, 카페, 편의점
+        user_lat = request.query_params.get("lat")
+        user_lng = request.query_params.get("lng")
 
-        # 1️⃣ 복구완료 사고 목록
-        recovered_incidents = RecoveryIncident.objects.filter(status='RECOVERED')
+        category_code = CATEGORY_MAP.get(category) if category else "FD6,CE7,CS2"
 
-        # 2️⃣ 복구완료 사고 주변 200m 이내 상점만
-        places_in_radius = set()
-        for incident in recovered_incidents:
-            nearby_places = Place.objects.all()
-            if category:
-                nearby_places = nearby_places.filter(category=category)
+        kakao_url = "https://dapi.kakao.com/v2/local/search/keyword.json"
+        headers = {"Authorization": f"KakaoAK {settings.KAKAO_REST_KEY}"}
 
-            for p in nearby_places:
-                dist = calculate_distance(float(incident.lat), float(incident.lng), float(p.lat), float(p.lng))
-                if dist <= 200:
-                    places_in_radius.add(p.id)
+        incidents = RecoveryIncident.objects.filter(status=RecoveryIncident.RecoveryStatus.RECOVERED)
 
-        qs = Place.objects.filter(id__in=places_in_radius)
-        qs = apply_default_images(qs)
+        candidate_places = []
 
-        items = [
-            {
-                "id": p.id,
-                "name": p.name,
-                "category": p.category,
-                "address": p.address,
-                "lat": p.lat,
-                "lng": p.lng,
-                "main_image_url": p.main_image_url,
-                "kakao_place_id": p.kakao_place_id,
-                "kakao_url": p.kakao_url,
-                "distance_m": None
+        for incident in incidents:
+            params = {
+                "query": "맛집",
+                "category_group_code": category_code,
+                "x": float(incident.lng),
+                "y": float(incident.lat),
+                "radius": 200
             }
-            for p in qs
-        ]
+            resp = requests.get(kakao_url, headers=headers, params=params)
 
-        return api_response(
-            "success",
-            "상점 목록 조회 성공",
-            200,
-            {
-                "items": items,
-                "count": len(items)
-            }
-        )
-        
-    @action(detail=False, methods=['get'], url_path="near")
-    def near(self, request):
-        try:
-            lat = float(request.GET.get('lat'))
-            lng = float(request.GET.get('lng'))
-        except (TypeError, ValueError):
-            return api_response("error", "lat/lng 파라미터가 필요합니다.", 400, {})
+            if resp.status_code != 200:
+                continue
 
-        radius = float(request.GET.get('radius', 1000))
-        category = request.GET.get('category')
+            docs = resp.json().get("documents", [])
+            for doc in docs:
+                place = {
+                    "name": doc["place_name"],
+                    "address": doc["road_address_name"] or doc["address_name"],
+                    "lat": float(doc["y"]),
+                    "lng": float(doc["x"]),
+                    "category": doc["category_group_code"],
+                    "place_url": doc["place_url"],
+                }
+                candidate_places.append(place)
 
-        qs = Place.objects.filter(
-            id__in=PlaceIncidentProximity.objects.filter(
-                incident__status='RECOVERED'
-            ).values_list('place_id', flat=True)
-        )
+        if user_lat and user_lng:
+            user_lat = float(user_lat)
+            user_lng = float(user_lng)
+            filtered = []
+            for place in candidate_places:
+                dist = haversine(user_lat, user_lng, place["lat"], place["lng"])
+                if dist <= 1000:  # 1km 이내만으로 설정
+                    filtered.append(place)
+            candidate_places = filtered
 
-        if category and category in CATEGORY_IMAGES.keys():
-            qs = qs.filter(category=category)
-
-        qs = apply_default_images(qs)
-
-        count = 0
-        for p in qs:
-            dist = calculate_distance(lat, lng, float(p.lat), float(p.lng))
-            if dist <= radius:
-                count += 1
-
-        return api_response(
-            "success",
-            "반경 내 상점 개수 조회 성공",
-            200,
-            {"count": count}
-        )
-
-    @action(detail=False, methods=['get'], url_path="near-incidents")
-    def near_incidents(self, request):
-        try:
-            incident_id = int(request.GET.get('incident_id'))
-        except (TypeError, ValueError):
-            return api_response("error", "incident_id 파라미터가 필요합니다.", 400, {})
-
-        radius = float(request.GET.get('radius', 200))
-        category = request.GET.get('category')
-
-        try:
-            incident = RecoveryIncident.objects.get(id=incident_id)
-        except RecoveryIncident.DoesNotExist:
-            return api_response("error", "해당 incident가 존재하지 않습니다.", 404, {})
-
-        qs = Place.objects.all()
-        if category and category in CATEGORY_IMAGES.keys():
-            qs = qs.filter(category=category)
-
-        qs = apply_default_images(qs)
-
-        count = 0
-        for p in qs:
-            dist = calculate_distance(float(incident.lat), float(incident.lng), float(p.lat), float(p.lng))
-            if dist <= radius:
-                count += 1
-
-        return api_response(
-            "success",
-            "사고 주변 상점 개수 조회 성공",
-            200,
-            {"count": count}
-        )
+        return Response({
+            "status": "success",
+            "count": len(candidate_places),
+            "items": candidate_places
+        }, status=status.HTTP_200_OK)

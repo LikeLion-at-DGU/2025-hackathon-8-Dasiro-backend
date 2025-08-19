@@ -1,9 +1,9 @@
-from rest_framework.routers import SimpleRouter
+from rest_framework.routers import DefaultRouter
 from .views import PlaceViewSet
 
 app_name = "places"
 
-router = SimpleRouter(trailing_slash=False)
+router = DefaultRouter()
 router.register("", PlaceViewSet, basename="places")
 
 urlpatterns = router.urls
