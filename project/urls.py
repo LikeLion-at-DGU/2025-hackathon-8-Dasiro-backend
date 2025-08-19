@@ -7,4 +7,5 @@ urlpatterns = [
     path('api/v1/places/', include('places.urls', namespace='places')),
     path('api/v1/districts/', include('districts.urls', namespace='districts')),
     path('api/v1/proxy/', include('routes.urls', namespace='routes')),
+    path('api/v1/coupons/', include('coupons.urls', namespace='coupons')),
 ]
