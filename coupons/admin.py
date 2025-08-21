@@ -2,7 +2,6 @@ from django.contrib import admin
 from .models import Coupon, CouponCode
 
 class CouponCodeInline(admin.TabularInline):
-    """쿠폰 등록 화면에서 바로 코드도 관리 가능"""
     model = CouponCode
     extra = 0
     readonly_fields = ("issued_at", "redeemed_at")
