@@ -1,7 +1,7 @@
 from rest_framework import viewsets, status
 from rest_framework.response import Response
-from .models import Coupon
-from .serializers import CouponDetailSerializer
+from .models import *
+from .serializers import *
 
 class CouponViewSet(viewsets.ReadOnlyModelViewSet):
     
