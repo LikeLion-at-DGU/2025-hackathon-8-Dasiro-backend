@@ -1,15 +1,15 @@
 from rest_framework import serializers
-from .models import *
+from .models import Coupon, CouponCode
 
 
 class CouponCodeSerializer(serializers.ModelSerializer):
     class Meta:
         model = CouponCode
-        fields = ["id", "code", "barcode_type", "status"]
+        fields = ["code", "barcode_type", "status"]
 
 
 class CouponDetailSerializer(serializers.ModelSerializer):
-    codes = CouponCodeSerializer(many=True, source="couponcode_set")
+    code = CouponCodeSerializer(read_only=True)
 
     class Meta:
         model = Coupon
@@ -21,5 +21,5 @@ class CouponDetailSerializer(serializers.ModelSerializer):
             "starts_at",
             "ends_at",
             "is_active",
-            "codes",
+            "code",
         ]
