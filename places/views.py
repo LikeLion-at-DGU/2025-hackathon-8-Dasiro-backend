@@ -5,6 +5,7 @@ import requests
 
 from incidents.models import RecoveryIncident
 from coupons.models import Coupon
+from places.models import Place
 from .utils import haversine
 from .serializers import CATEGORY_IMAGES
 
@@ -28,29 +29,42 @@ class PlaceViewSet(viewsets.ViewSet):
                     "status": "error",
                     "message": "잘못된 카테고리",
                     "code": 400,
-                    "data": {"detail": "category must be one of FOOD, CAFE, CONVENIENCE, OTHER"}
+                    "data": {"detail": "category must be one of FOOD, CAFE, CONVENIENCE"}
                 }, status=status.HTTP_400_BAD_REQUEST)
             category_code = CATEGORY_MAP[category]
         else:
             category_code = "FD6,CE7,CS2"
 
-        kakao_url = "https://dapi.kakao.com/v2/local/search/keyword.json"
+        kakao_url = "https://dapi.kakao.com/v2/local/search/category.json"
         headers = {"Authorization": f"KakaoAK {settings.KAKAO_REST_KEY}"}
-
-        incidents = RecoveryIncident.objects.filter(status=RecoveryIncident.RecoveryStatus.RECOVERED)
 
         candidate_places = []
 
+        db_places = Place.objects.all()
+        for p in db_places:
+            coupons = Coupon.objects.filter(place=p, is_active=True).values("id", "title", "starts_at", "ends_at")
+            candidate_places.append({
+                "name": p.name,
+                "address": p.address,
+                "lat": float(p.lat),
+                "lng": float(p.lng),
+                "category": p.category,
+                "main_image_url": p.image_url or CATEGORY_IMAGES.get(p.category, None),
+                "kakao_place_id": p.kakao_place_id,
+                "kakao_url": p.place_url,
+                "distance_m": None,
+                "coupons": list(coupons),
+            })
+
+        incidents = RecoveryIncident.objects.filter(status=RecoveryIncident.RecoveryStatus.RECOVERED)
         for incident in incidents:
             params = {
-                "query": "맛집", # 임시
                 "category_group_code": category_code,
                 "x": float(incident.lng),
                 "y": float(incident.lat),
                 "radius": 200
             }
             resp = requests.get(kakao_url, headers=headers, params=params)
-
             if resp.status_code != 200:
                 continue
 
@@ -83,7 +97,7 @@ class PlaceViewSet(viewsets.ViewSet):
             filtered = []
             for place in candidate_places:
                 dist = haversine(user_lat, user_lng, place["lat"], place["lng"])
-                if dist <= 1000:
+                if dist <= 1000:  # 1km 이내만
                     place["distance_m"] = int(dist)
                     filtered.append(place)
             candidate_places = filtered
