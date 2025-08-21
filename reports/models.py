@@ -1,25 +1,20 @@
 from django.db import models
 
 class CitizenReport(models.Model):
-    class RiskGrade(models.TextChoices):
-        G1 = 'G1', '1등급'
-        G2 = 'G2', '2등급'
-        G3 = 'G3', '3등급'
-        G4 = 'G4', '4등급'
-        G5 = 'G5', '5등급'
+    class ReportStatus(models.TextChoices):
+        RECEIVED = "received", "접수됨"
+        ANALYZING = "analyzing", "분석중"
+        DONE = "done", "분석완료"
 
-    address = models.CharField(max_length=255)
-    lat = models.DecimalField(max_digits=10, decimal_places=7)
-    lng = models.DecimalField(max_digits=10, decimal_places=7)
-    text = models.TextField(blank=True, null=True)
+    text = models.TextField()  # 제보 텍스트
+    lat = models.DecimalField(max_digits=10, decimal_places=7)  # 위도
+    lng = models.DecimalField(max_digits=10, decimal_places=7)  # 경도
     created_at = models.DateTimeField(auto_now_add=True)
-    status = models.CharField(max_length=20)  # 'received','analyzing','done'
-    risk_score = models.IntegerField(blank=True, null=True)
-    risk_grade = models.CharField(max_length=2, choices=RiskGrade.choices, blank=True, null=True)
-    advice_text = models.TextField(blank=True, null=True)
+    status = models.CharField(max_length=20, choices=ReportStatus.choices, default=ReportStatus.RECEIVED)
+    risk_score = models.IntegerField(blank=True, null=True)  # 0~100
 
     def __str__(self):
-        return f"{self.address} ({self.status})"
+        return f"Report #{self.id} ({self.status})"
 
 
 class CitizenReportImage(models.Model):
