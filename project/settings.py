@@ -56,6 +56,8 @@ EMAIL_HOST_USER = env("EMAIL_HOST_USER")  # .env에서 불러오기
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD")  # 앱 비밀번호
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
+# GPT 추가
+OPENAI_API_KEY = env('OPENAI_API_KEY')
 
 # Application definition
 
