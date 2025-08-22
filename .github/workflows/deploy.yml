@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      # .env 파일 생성 (Kakao + S3 키까지 추가했음)
+      # .env 파일 생성 (Kakao + S3 키까지 추가했음 +9.22 EMAIL 추가)
       - name: Create .env for CI
         run: |
           echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" > .env
