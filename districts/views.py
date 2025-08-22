@@ -1,13 +1,19 @@
 import csv
 import os
-from collections import defaultdict
+import openai
 from django.conf import settings
+from django.utils import timezone
+from datetime import timedelta
+from incidents.models import RecoveryIncident
+from collections import defaultdict
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
-from .models import District, DistrictMetric
+from .models import *
+from incidents.models import *
 from django.db.models import Max
+
 
 
 # 등급 임시 매핑용
@@ -309,10 +315,7 @@ class SafezoneViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["get"], url_path="districts")
     def safe_districts(self, request):
-        """
-        부동산 안심존 – 동 목록
-        GET /api/v1/safezones/districts
-        """
+
         metrics, latest_date = self._latest_metrics()
         if latest_date is None:
             return Response({
@@ -355,4 +358,95 @@ class SafezoneViewSet(viewsets.ViewSet):
             "message": "안심존(동) 조회 성공",
             "code": 200,
             "data": {"items": safe_items, "as_of_date": str(latest_date), "count": len(safe_items)}
+        })
+        
+class DistrictRiskViewSet(viewsets.ViewSet):
+
+    def _generate_gpt_analysis(self, district, incidents):
+        count = incidents.count()
+        causes = list(set([i.cause for i in incidents if i.cause]))
+        causes_str = ", ".join(causes) if causes else "원인 데이터 없음"
+
+        # DB 기반으로 첫문단 구성
+        first_paragraph = f"{district.dong}은 최근 2년간 싱크홀 사고가 {count}건 발생한 지역이에요. 주요 원인은 {causes_str}으로 확인 돼요."
+
+        # GPT는 추가 설명으로 두번째, 세번째 문단을 구성함
+        prompt = f"""
+        행정동: {district.dong}
+        시군구: {district.sigungu}
+        최근 2년간 싱크홀 사고 건수: {count}건
+        주요 원인: {causes_str}
+
+        위 데이터를 기반으로,
+        안내문 형식으로 2번째와 3번째 문단을 작성해줘.
+        - 2번째 문단: 해당 지역이 왜 취약한지, 지반·시설·공사 등의 맥락을 객관적으로 설명
+        - 3번째 문단: 해당 지역 관리나 점검 필요성, 주의 사항을 설명
+        - '주민들은' 같은 직접적 표현 대신 객관적인 설명 위주로 작성
+        - 반드시 '~에요, ~돼요, ~해져요' 같은 구어체 설명 문장으로만 작성해
+        - '~입니다', '~합니다' 같은 격식체 표현은 절대 쓰지 마
+        - 모든 문장은 '~에요'로 끝나도록 해
+        - 문단은 2~3줄 단위로 나누어 자연스럽게 이어가고, 말투는 부드럽게
+        - 한국어로 작성
+        """
+
+        client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "너는 재난안전 전문가야."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=600
+        )
+        gpt_text = resp.choices[0].message.content.strip()
+
+        return first_paragraph + "\n\n" + gpt_text
+
+    @action(detail=False, methods=["get", "post"], url_path="risk-info")
+    def risk_info_by_dong(self, request):
+
+        dong = request.query_params.get("dong") or request.data.get("dong")
+
+        if not dong:
+            return Response({"status": "error", "message": "dong 필요", "code": 400, "data": {}}, status=400)
+
+        district = District.objects.filter(dong__icontains=dong).first()
+        if not district:
+            return Response({"status": "error", "message": "동 없음", "code": 404, "data": {}}, status=404)
+
+        two_years_ago = timezone.now().date() - timedelta(days=730)
+        incidents = RecoveryIncident.objects.filter(
+            address__icontains=district.dong,
+            occurred_at__gte=two_years_ago
+        ).order_by("-occurred_at")
+
+        if not incidents.exists():
+            return Response({"status": "error", "message": "사고 데이터 없음", "code": 404, "data": {}}, status=404)
+
+        latest = DistrictMetric.objects.filter(district=district).order_by("-as_of_date").first()
+        if not latest:
+            return Response({"status": "error", "message": "지표 없음", "code": 404, "data": {}}, status=404)
+
+        # GPT 캐싱 넣었음 !
+        if latest.analysis_text:
+            gpt_analysis = latest.analysis_text
+        else:
+            gpt_analysis = self._generate_gpt_analysis(district, incidents)
+            latest.analysis_text = gpt_analysis
+            latest.save()
+
+        return Response({
+            "status": "success",
+            "message": "위험도 조회 성공",
+            "code": 200,
+            "data": {
+                "district_id": district.id,
+                "sido": district.sido,
+                "sigungu": district.sigungu,
+                "dong": district.dong,
+                "as_of_date": latest.as_of_date,
+                "total_grade": latest.total_grade,
+                "recent_incidents": incidents.count(),
+                "analysis_text": gpt_analysis
+            }
         })
