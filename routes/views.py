@@ -80,7 +80,6 @@ class KakaoProxyViewSet(viewsets.ViewSet):
     def safe_routes(self, request):
         origin = request.data.get("origin")
         destination = request.data.get("destination")
-        modes = request.data.get("modes", ["walk", "car"])
         avoid_incidents = request.data.get("avoid_incidents", True)
         avoid_status = request.data.get("avoid_status", ["UNDER_REPAIR", "TEMP_REPAIRED"])
         avoid_radius_m = int(request.data.get("avoid_radius_m", 200))
@@ -88,60 +87,97 @@ class KakaoProxyViewSet(viewsets.ViewSet):
         if not origin or not destination:
             return Response({"status": "error", "message": "출발/도착 좌표 누락", "code": 400}, status=400)
 
+        headers = {"Authorization": f"KakaoAK {settings.KAKAO_REST_KEY}"}
         routes = []
-        for mode in modes:
-            url = f"{settings.KAKAO_API_BASE}/v1/directions"
-            headers = {"Authorization": f"KakaoAK {settings.KAKAO_REST_KEY}"}
-            params = {
+
+        def extract_path(route_data):
+            path = []
+            for sec in route_data.get("routes", [])[0].get("sections", []):
+                for road in sec.get("roads", []):
+                    v = road.get("vertexes", [])
+                    for i in range(0, len(v), 2):
+                        path.append([v[i+1], v[i]])
+            return path
+
+        # 차량 경로
+        try:
+            car_url = f"{settings.KAKAO_API_BASE}/v1/directions"
+            car_params = {
                 "origin": f"{origin['lng']},{origin['lat']}",
                 "destination": f"{destination['lng']},{destination['lat']}",
-                "vehicle_type": 1 if mode == "walk" else 2,
             }
+            car_resp = requests.get(car_url, headers=headers, params=car_params, timeout=settings.KAKAO_TIMEOUT)
+            car_resp.raise_for_status()
+            car_data = car_resp.json()
 
-            try:
-                r = requests.get(url, headers=headers, params=params, timeout=settings.KAKAO_TIMEOUT)
-                r.raise_for_status()
-                data = r.json()
+            car_path = extract_path(car_data)
 
-                path = []
-                for sec in data.get("routes", [])[0].get("sections", []):
-                    for road in sec.get("roads", []):
-                        v = road.get("vertexes", [])
-                        for i in range(0, len(v), 2):
-                            path.append([v[i+1], v[i]])
+            # 사고 회피 처리
+            if avoid_incidents:
+                incidents = RecoveryIncident.objects.filter(status__in=avoid_status)
+                safe_path = []
+                for lat, lng in car_path:
+                    too_close = False
+                    for inc in incidents:
+                        dist = haversine(lat, lng, float(inc.lat), float(inc.lng))
+                        if dist <= avoid_radius_m:
+                            too_close = True
+                            break
+                    if not too_close:
+                        safe_path.append([lat, lng])
+                car_path = safe_path
 
-                if avoid_incidents:
-                    incidents = RecoveryIncident.objects.filter(status__in=avoid_status)
-                    safe_path = []
-                    for lat, lng in path:
-                        too_close = False
-                        for inc in incidents:
-                            dist = haversine(lat, lng, float(inc.lat), float(inc.lng))
-                            if dist <= avoid_radius_m:
-                                too_close = True
-                                break
-                        if not too_close:
-                            safe_path.append([lat, lng])
-                    path = safe_path
+            car_summary = car_data.get("routes", [])[0].get("summary", {})
+            routes.append({
+                "mode": "car",
+                "duration_sec": car_summary.get("duration", 0),
+                "distance_m": car_summary.get("distance", 0),
+                "polyline": car_path
+            })
+        except Exception as e:
+            return Response({"status": "error", "message": "차량 경로 계산 실패", "code": 502, "data": {"detail": str(e)}}, status=502)
 
-                summary = data.get("routes", [])[0].get("summary", {})
-                duration = summary.get("duration", 0)
-                distance = summary.get("distance", 0)
+        # 도보 경로
+        try:
+            walk_url = f"{settings.KAKAO_API_BASE}/v1/directions/walk"
+            walk_params = {
+                "origin": f"{origin['lng']},{origin['lat']}",
+                "destination": f"{destination['lng']},{destination['lat']}",
+            }
+            walk_resp = requests.get(walk_url, headers=headers, params=walk_params, timeout=settings.KAKAO_TIMEOUT)
+            walk_resp.raise_for_status()
+            walk_data = walk_resp.json()
 
-                RouteLog.objects.create(
-                    origin_lat=origin["lat"], origin_lng=origin["lng"],
-                    dest_lat=destination["lat"], dest_lng=destination["lng"],
-                    mode=mode, provider="kakao",
-                    duration_sec=duration, distance_m=distance, raw_response=data
-                )
+            walk_path = extract_path(walk_data)
 
-                routes.append({
-                    "mode": mode,
-                    "duration_sec": duration,
-                    "distance_m": distance,
-                    "polyline": path
-                })
-            except Exception as e:
-                return Response({"status": "error", "message": "경로 계산 실패", "code": 502, "data": {"detail": str(e)}}, status=502)
+            # 사고 회피 처리
+            if avoid_incidents:
+                incidents = RecoveryIncident.objects.filter(status__in=avoid_status)
+                safe_path = []
+                for lat, lng in walk_path:
+                    too_close = False
+                    for inc in incidents:
+                        dist = haversine(lat, lng, float(inc.lat), float(inc.lng))
+                        if dist <= avoid_radius_m:
+                            too_close = True
+                            break
+                    if not too_close:
+                        safe_path.append([lat, lng])
+                walk_path = safe_path
 
-        return Response({"status": "success", "message": "안전 경로 탐색 성공", "code": 200, "data": {"routes": routes}})
+            walk_summary = walk_data.get("routes", [])[0].get("summary", {})
+            routes.append({
+                "mode": "walk",
+                "duration_sec": walk_summary.get("duration", 0),
+                "distance_m": walk_summary.get("distance", 0),
+                "polyline": walk_path
+            })
+        except Exception as e:
+            return Response({"status": "error", "message": "도보 경로 계산 실패", "code": 502, "data": {"detail": str(e)}}, status=502)
+
+        return Response({
+            "status": "success",
+            "message": "안전 경로 탐색 성공",
+            "code": 200,
+            "data": {"routes": routes}
+        })
