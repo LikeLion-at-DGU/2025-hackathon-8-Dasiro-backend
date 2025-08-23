@@ -1,7 +1,7 @@
 import csv
 import os
 import openai
-from django.db.models import Count
+from django.db.models import Count, F
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
