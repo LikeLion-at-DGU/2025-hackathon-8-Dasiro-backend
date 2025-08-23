@@ -1,4 +1,5 @@
 from django.db import models
+from districts.models import *
 
 class RecoveryIncident(models.Model):
     class RecoveryStatus(models.TextChoices):
@@ -6,6 +7,7 @@ class RecoveryIncident(models.Model):
         TEMP_REPAIRED = 'TEMP_REPAIRED', '임시복구'
         RECOVERED = 'RECOVERED', '복구완료'
 
+    district = models.ForeignKey(District, on_delete=models.SET_NULL, null=True, blank=True)
     occurred_at = models.DateField()
     address = models.CharField(max_length=255)
     lat = models.DecimalField(max_digits=20, decimal_places=15)
