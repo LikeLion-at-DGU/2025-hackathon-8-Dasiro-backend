@@ -1,6 +1,7 @@
 import csv
 import os
 import openai
+from django.db.models import Count
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
@@ -241,6 +242,51 @@ class DistrictViewSet(viewsets.ViewSet):
             "message": "동 등급 필터 조회 성공",
             "code": 200,
             "data": {"items": data, "as_of_date": "2025-08-01", "count": len(data)}
+        })
+        
+    @action(detail=False, methods=["get"], url_path="gu/recovery-status")
+    def gu_recovery_status(self, request):
+
+        incidents = (
+            RecoveryIncident.objects
+            .values("status", gu_code=F("district_id")/1000)  # district_id 앞 5자리 = 구코드
+            .annotate(count=Count("id"))
+        )
+
+        gu_data = {}
+        for row in incidents:
+            gu_code = int(str(row["gu_code"])[:5])
+            status_name = row["status"]
+            count = row["count"]
+
+            if gu_code not in gu_data:
+                gu_data[gu_code] = {"RECOVERING": 0, "TEMP_REPAIRED": 0, "RECOVERED": 0}
+
+            gu_data[gu_code][status_name] = count
+
+        results = []
+        for gu_code, counts in gu_data.items():
+            gu_districts = District.objects.filter(id__startswith=str(gu_code))
+            if not gu_districts.exists():
+                continue
+            avg_lat = sum(float(d.center_lat) for d in gu_districts) / gu_districts.count()
+            avg_lng = sum(float(d.center_lng) for d in gu_districts) / gu_districts.count()
+            first = gu_districts.first()
+
+            results.append({
+                "gu_code": gu_code,
+                "sido": first.sido,
+                "sigungu": first.sigungu,
+                "center_lat": round(avg_lat, 6),
+                "center_lng": round(avg_lng, 6),
+                "recovery_counts": counts,
+            })
+
+        return Response({
+            "status": "success",
+            "message": "구별 복구 현황 조회 성공",
+            "code": 200,
+            "data": {"items": results, "count": len(results)}
         })
         
 class SafezoneViewSet(viewsets.ViewSet):
