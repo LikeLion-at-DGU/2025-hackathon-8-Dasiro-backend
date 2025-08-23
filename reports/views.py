@@ -120,10 +120,10 @@ class CitizenReportViewSet(viewsets.ViewSet):
                 subject=f"[싱크홀 제보] Report #{report.id}",
                 message=message,
                 from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=["jinhwanpark@seoul.go.kr"],
+                recipient_list=["forestbin0420@dgu.ac.kr"],
             )
 
-            response_data["sent_to"] = "jinhwanpark@seoul.go.kr"
+            response_data["sent_to"] = "forestbin0420@dgu.ac.kr"
             response_data["sent_at"] = report.updated_at.isoformat() if hasattr(report, "updated_at") else None
 
         return Response({
