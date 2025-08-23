@@ -7,8 +7,8 @@ class CitizenReport(models.Model):
         DONE = "done", "분석완료"
 
     text = models.TextField()  # 제보 텍스트
-    lat = models.DecimalField(max_digits=10, decimal_places=7)  # 위도
-    lng = models.DecimalField(max_digits=10, decimal_places=7)  # 경도
+    lat = models.DecimalField(max_digits=20, decimal_places=10)  # 위도
+    lng = models.DecimalField(max_digits=20, decimal_places=10)  # 경도
     created_at = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=20, choices=ReportStatus.choices, default=ReportStatus.RECEIVED)
     risk_score = models.IntegerField(blank=True, null=True)  # 0~100
