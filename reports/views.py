@@ -18,7 +18,9 @@ def upload_to_s3(file):
         region_name=settings.AWS_S3_REGION_NAME,
     )
     key = f"reports/{uuid4()}_{file.name}"
-    s3.upload_fileobj(file, settings.AWS_STORAGE_BUCKET_NAME, key, ExtraArgs={"ACL": "public-read"})
+    
+    # ACL 제거했음 !
+    s3.upload_fileobj(file, settings.AWS_STORAGE_BUCKET_NAME, key)
     return f"https://{settings.AWS_S3_CUSTOM_DOMAIN}/{key}"
 
 
