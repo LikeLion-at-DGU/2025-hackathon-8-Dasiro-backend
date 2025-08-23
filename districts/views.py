@@ -413,7 +413,7 @@ class DistrictRiskViewSet(viewsets.ViewSet):
         causes = list(set([i.cause for i in incidents if i.cause]))
         causes_str = ", ".join(causes) if causes else "원인 데이터 없음"
 
-        # DB 기반으로 첫문단 구성
+        # DB 기반으로 첫문단 구성함
         first_paragraph = f"{district.dong}은 최근 2년간 싱크홀 사고가 {count}건 발생한 지역이에요. 주요 원인은 {causes_str}으로 확인 돼요."
 
         # GPT는 추가 설명으로 두번째, 세번째 문단을 구성함
@@ -466,14 +466,62 @@ class DistrictRiskViewSet(viewsets.ViewSet):
             occurred_at__gte=two_years_ago
         ).order_by("-occurred_at")
 
-        if not incidents.exists():
-            return Response({"status": "error", "message": "사고 데이터 없음", "code": 404, "data": {}}, status=404)
-
         latest = DistrictMetric.objects.filter(district=district).order_by("-as_of_date").first()
         if not latest:
             return Response({"status": "error", "message": "지표 없음", "code": 404, "data": {}}, status=404)
 
-        # GPT 캐싱 넣었음 !
+        # 싱크홀 사고 이력 없는 경우 → 0건으로 안내 후, 다르게 2/3문단 구성
+        if not incidents.exists():
+            first_paragraph = f"{district.dong}은 최근 2년간 싱크홀 사고가 0건으로 발생하지 않은 지역이에요. 현재까지는 특별히 위험 징후가 확인되지 않았어요."
+
+            prompt = f"""
+            행정동: {district.dong}
+            시군구: {district.sigungu}
+            최근 2년간 싱크홀 사고 건수: 0건
+
+            위 데이터를 기반으로,
+            안내문 형식으로 2번째와 3번째 문단을 작성해줘.
+            - 2번째 문단: 최근 사고가 없는 지역의 특성을 설명하고, 지반·시설·공사 측면에서 안정적일 수 있음을 언급
+            - 3번째 문단: 앞으로도 주의 깊은 관리가 필요하지만 현재는 비교적 안전하다는 내용을 설명
+            - 반드시 '~에요, ~돼요, ~해져요' 같은 구어체 설명 문장으로만 작성해
+            - '~입니다', '~합니다' 같은 격식체 표현은 절대 쓰지 마
+            - 모든 문장은 '~에요'로 끝나도록 해
+            - 문단은 2~3줄 단위로 나누어 자연스럽게 이어가고, 말투는 부드럽게
+            - 한국어로 작성
+            """
+
+            client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "너는 재난안전 전문가야."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=600
+            )
+            gpt_text = resp.choices[0].message.content.strip()
+            gpt_analysis = first_paragraph + "\n\n" + gpt_text
+
+            latest.analysis_text = gpt_analysis
+            latest.save()
+
+            return Response({
+                "status": "success",
+                "message": "위험도 조회 성공",
+                "code": 200,
+                "data": {
+                    "district_id": district.id,
+                    "sido": district.sido,
+                    "sigungu": district.sigungu,
+                    "dong": district.dong,
+                    "as_of_date": latest.as_of_date,
+                    "total_grade": latest.total_grade,
+                    "recent_incidents": 0,
+                    "analysis_text": gpt_analysis
+                }
+            })
+
+        # 싱크홀 사고 이력 있는 경우 → 기존 로직 유지
         if latest.analysis_text:
             gpt_analysis = latest.analysis_text
         else:
