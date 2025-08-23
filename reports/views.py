@@ -85,7 +85,7 @@ class CitizenReportViewSet(viewsets.ViewSet):
             return Response({"status": "error", "message": "분석할 이미지가 필요합니다."}, status=400)
 
         # TODO: AI 서버 프록시 호출 → risk_score 수신
-        fake_score = 82
+        fake_score = 42
         report.risk_score = fake_score
         report.status = CitizenReport.ReportStatus.DONE
         report.save()
