@@ -1,6 +1,7 @@
 import requests
+import io
 
-from rest_framework import viewsets
+from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.core.mail import send_mail
@@ -11,7 +12,8 @@ from uuid import uuid4
 from .models import CitizenReport, CitizenReportImage, BotMessage
 from .serializers import CitizenReportSerializer, CitizenReportCreateSerializer
 
-AI_BASE_URL = "http://52.78.104.121:8001"  # AI 서버 주소 추가
+AI_BASE_URL = "http://52.78.104.121:8001"  # AI 서버 주소
+
 
 def upload_to_s3(file):
     s3 = boto3.client(
@@ -21,8 +23,6 @@ def upload_to_s3(file):
         region_name=settings.AWS_S3_REGION_NAME,
     )
     key = f"reports/{uuid4()}_{file.name}"
-    
-    # ACL 제거했음 !
     s3.upload_fileobj(file, settings.AWS_STORAGE_BUCKET_NAME, key)
     return f"https://{settings.AWS_S3_CUSTOM_DOMAIN}/{key}"
 
@@ -33,8 +33,18 @@ class CitizenReportViewSet(viewsets.ViewSet):
         serializer = CitizenReportCreateSerializer(data=request.data)
         if serializer.is_valid():
             report = serializer.save(status=CitizenReport.ReportStatus.RECEIVED)
-            return Response({"status": "success", "message": "제보 접수 완료", "code": 200, "data": CitizenReportSerializer(report).data})
-        return Response({"status": "error", "message": "유효하지 않은 입력", "code": 400, "data": serializer.errors}, status=400)
+            return Response({
+                "status": "success",
+                "message": "제보 접수 완료",
+                "code": 200,
+                "data": CitizenReportSerializer(report).data
+            })
+        return Response({
+            "status": "error",
+            "message": "유효하지 않은 입력",
+            "code": 400,
+            "data": serializer.errors
+        }, status=400)
 
     def retrieve(self, request, pk=None):
         try:
@@ -42,7 +52,12 @@ class CitizenReportViewSet(viewsets.ViewSet):
         except CitizenReport.DoesNotExist:
             return Response({"status": "error", "message": "제보를 찾을 수 없습니다."}, status=404)
 
-        return Response({"status": "success", "message": "조회 성공", "code": 200, "data": CitizenReportSerializer(report).data})
+        return Response({
+            "status": "success",
+            "message": "조회 성공",
+            "code": 200,
+            "data": CitizenReportSerializer(report).data
+        })
 
     @action(detail=True, methods=["get"], url_path="messages")
     def messages(self, request, pk=None):
@@ -52,7 +67,12 @@ class CitizenReportViewSet(viewsets.ViewSet):
             return Response({"status": "error", "message": "제보 없음"}, status=404)
 
         msgs = BotMessage.objects.filter(report=report).order_by("created_at")
-        return Response({"status": "success", "message": "메시지 조회 성공", "code": 200, "data": [{"role": m.role, "message": m.message, "created_at": m.created_at} for m in msgs]})
+        return Response({
+            "status": "success",
+            "message": "메시지 조회 성공",
+            "code": 200,
+            "data": [{"role": m.role, "message": m.message, "created_at": m.created_at} for m in msgs]
+        })
 
     @action(detail=True, methods=["post"], url_path="images")
     def upload_images(self, request, pk=None):
@@ -74,7 +94,12 @@ class CitizenReportViewSet(viewsets.ViewSet):
             img = CitizenReportImage.objects.create(report=report, image_url=url)
             uploaded_urls.append(img.image_url)
 
-        return Response({"status": "success", "message": "이미지 업로드 성공", "code": 200, "data": {"image_urls": uploaded_urls}})
+        return Response({
+            "status": "success",
+            "message": "이미지 업로드 성공",
+            "code": 200,
+            "data": {"image_urls": uploaded_urls}
+        })
 
     @action(detail=True, methods=["post"], url_path="analyze")
     def analyze(self, request, pk=None):
@@ -83,19 +108,32 @@ class CitizenReportViewSet(viewsets.ViewSet):
         except CitizenReport.DoesNotExist:
             return Response({"status": "error", "message": "제보 없음"}, status=404)
 
-        image_urls = request.data.get("image_urls")
+        image_urls = [img.image_url for img in report.images.all()]
         if not image_urls:
-            return Response({"status": "error", "message": "분석할 이미지가 필요합니다."}, status=400)
+            return Response({"status": "error", "message": "분석할 이미지가 없습니다."}, status=400)
 
         try:
+            files = []
+            for url in image_urls:
+                r = requests.get(url, stream=True)
+                r.raise_for_status()
+                filename = url.split("/")[-1]
+                files.append(("images", (filename, io.BytesIO(r.content))))  # 안전하게 BytesIO 사용
+
             resp = requests.post(
-                f"{AI_BASE_URL}/infer_batch",
-                json={"image_urls": image_urls},
-                timeout=10
+                f"{AI_BASE_URL}/infer_batch?agg=mean&lite=1",
+                headers={"X-AI-Key": settings.AI_API_KEY},
+                files=files,
+                timeout=20
             )
+
+            print("AI resp status:", resp.status_code)
+            print("AI resp text:", resp.text)
+
             resp.raise_for_status()
             ai_data = resp.json()
             risk_score = ai_data.get("risk_percent")
+
         except Exception as e:
             return Response({
                 "status": "error",
@@ -116,6 +154,7 @@ class CitizenReportViewSet(viewsets.ViewSet):
 
         response_data = {"risk_score": risk_score}
 
+        # 위험도 50 이상이면 이메일 발송
         if risk_score and float(risk_score) >= 50:
             message = f"""
             [싱크홀 탐지 기반 서비스 '다시로' 제보 알림]
@@ -137,17 +176,19 @@ class CitizenReportViewSet(viewsets.ViewSet):
             - 다시로 드림
             """
 
-            send_mail(
-                subject=f"[싱크홀 제보] Report #{report.id}",
-                message=message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=["forestbin0420@dgu.ac.kr"],
-            )
-
-            response_data["sent_to"] = "forestbin0420@dgu.ac.kr"
-            response_data["sent_at"] = (
-                report.updated_at.isoformat() if hasattr(report, "updated_at") else None
-            )
+            try:
+                send_mail(
+                    subject=f"[싱크홀 제보] Report #{report.id}",
+                    message=message,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=["forestbin0420@dgu.ac.kr"],
+                )
+                response_data["sent_to"] = "forestbin0420@dgu.ac.kr"
+                response_data["sent_at"] = (
+                    report.updated_at.isoformat() if hasattr(report, "updated_at") else None
+                )
+            except Exception as e:
+                response_data["mail_error"] = str(e)
 
         return Response({
             "status": "success",
@@ -155,7 +196,6 @@ class CitizenReportViewSet(viewsets.ViewSet):
             "code": 200,
             "data": response_data
         })
-
 
     @action(detail=True, methods=["post"], url_path="send-city")
     def send_city(self, request, pk=None):
@@ -166,7 +206,6 @@ class CitizenReportViewSet(viewsets.ViewSet):
 
         image_urls = [img.image_url for img in report.images.all()]
         message = f"""
-        
         [싱크홀 탐지 기반 서비스 '다시로' 제보 알림]
 
         안녕하세요. 다시로 시스템을 통해 시민으로부터 싱크홀 관련 제보가 접수되었습니다.

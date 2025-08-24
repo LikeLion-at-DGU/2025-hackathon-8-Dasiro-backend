@@ -74,6 +74,9 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 # GPT 추가
 OPENAI_API_KEY = env('OPENAI_API_KEY')
 
+# AI KEY 추가
+AI_API_KEY = env('AI_API_KEY')
+
 # Application definition
 
 INSTALLED_APPS = [
