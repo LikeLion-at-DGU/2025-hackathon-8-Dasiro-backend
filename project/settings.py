@@ -77,6 +77,11 @@ OPENAI_API_KEY = env('OPENAI_API_KEY')
 # AI KEY 추가
 AI_API_KEY = env('AI_API_KEY')
 
+# 도보용 ORS KEY 추가
+ORS_API_KEY = env("ORS_API_KEY")
+ORS_BASE = env("ORS_BASE", default="https://api.openrouteservice.org")
+ORS_TIMEOUT = env.int("ORS_TIMEOUT", default=10)
+
 # Application definition
 
 INSTALLED_APPS = [
