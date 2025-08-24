@@ -11,7 +11,6 @@ class District(models.Model):
     def __str__(self):
         return f"{self.sido} {self.sigungu} {self.dong}"
 
-
 class DistrictMetric(models.Model):
     class RiskGrade(models.TextChoices):
         G1 = 'G1', '1등급'
@@ -23,10 +22,13 @@ class DistrictMetric(models.Model):
     district = models.ForeignKey(District, on_delete=models.CASCADE)
     as_of_date = models.DateField()
     total_grade = models.CharField(max_length=2, choices=RiskGrade.choices)
-    ground_stability = models.CharField(max_length=2, choices=RiskGrade.choices)
-    groundwater_impact = models.CharField(max_length=2, choices=RiskGrade.choices)
-    underground_density = models.CharField(max_length=2, choices=RiskGrade.choices)
-    old_building_dist = models.CharField(max_length=2, choices=RiskGrade.choices)
+
+    ground_stability = models.CharField(max_length=2, choices=RiskGrade.choices)   # 지반 안정성
+    groundwater_impact = models.CharField(max_length=2, choices=RiskGrade.choices) # 지하수 영향
+    underground_density = models.CharField(max_length=2, choices=RiskGrade.choices) # 지하 구조물 밀집도
+    old_building_dist = models.CharField(max_length=2, choices=RiskGrade.choices)  # 노후 건물 분포
+    incident_history = models.CharField(max_length=2, choices=RiskGrade.choices, null=True, blank=True)   # 추가함: 싱크홀 사고 이력
+
     analysis_text = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -35,6 +37,3 @@ class DistrictMetric(models.Model):
         indexes = [
             models.Index(fields=["total_grade"]),
         ]
-
-    def __str__(self):
-        return f"{self.district} ({self.total_grade})"
