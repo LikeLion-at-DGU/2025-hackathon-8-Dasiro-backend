@@ -217,7 +217,6 @@ class ORSProxyViewSet(viewsets.ViewSet):
             "Content-Type": "application/json; charset=utf-8"
         }
 
-        # 회피 폴리곤 생성
         avoid_polygons = None
         if avoid_incidents:
             incidents = RecoveryIncident.objects.filter(status__in=avoid_status)
@@ -229,7 +228,6 @@ class ORSProxyViewSet(viewsets.ViewSet):
                     "coordinates": [p["coordinates"] for p in polygons]
                 }
 
-        # 좌표는 반드시 [lng, lat] 순서 + float 변환
         body = {
             "coordinates": [
                 [float(origin["lng"]), float(origin["lat"])],
@@ -247,18 +245,39 @@ class ORSProxyViewSet(viewsets.ViewSet):
             r.raise_for_status()
             data = r.json()
 
+            if not data.get("routes"):
+                return Response({
+                    "status": "error",
+                    "message": "경로를 찾을 수 없음",
+                    "code": 404,
+                    "data": data.get("error", {})
+                }, status=404)
+
             route = data["routes"][0]
-            summary = route["summary"]
-            geometry_data = route["geometry"]
+            summary = route.get("summary", {})
+            geometry_data = route.get("geometry")
 
             if isinstance(geometry_data, str):
                 try:
-                    polyline = decode_polyline(geometry_data, precision=1e5)
+                    polyline = decode_polyline(geometry_data)
                 except Exception:
-                    polyline = decode_polyline(geometry_data, precision=1e6)
-            else:
+                    return Response({
+                        "status": "error",
+                        "message": "polyline 디코딩 실패",
+                        "code": 502,
+                        "data": {"geometry": geometry_data}
+                    }, status=502)
+            elif isinstance(geometry_data, list):
                 polyline = [[lat, lng] for lng, lat in geometry_data]
+            else:
+                return Response({
+                    "status": "error",
+                    "message": "geometry 포맷 알 수 없음",
+                    "code": 502,
+                    "data": {"geometry": geometry_data}
+                }, status=502)
 
+            # 로그 저장
             RouteLog.objects.create(
                 origin_lat=float(origin["lat"]),
                 origin_lng=float(origin["lng"]),
@@ -266,8 +285,8 @@ class ORSProxyViewSet(viewsets.ViewSet):
                 dest_lng=float(destination["lng"]),
                 mode="walk",
                 provider="ors",
-                duration_sec=int(summary["duration"]),
-                distance_m=int(summary["distance"]),
+                duration_sec=int(summary.get("duration", 0)),
+                distance_m=int(summary.get("distance", 0)),
                 raw_response=data
             )
 
@@ -277,8 +296,8 @@ class ORSProxyViewSet(viewsets.ViewSet):
                 "code": 200,
                 "data": {
                     "mode": "walk",
-                    "duration_sec": summary["duration"],
-                    "distance_m": summary["distance"],
+                    "duration_sec": summary.get("duration", 0),
+                    "distance_m": summary.get("distance", 0),
                     "polyline": polyline
                 }
             })
@@ -289,33 +308,3 @@ class ORSProxyViewSet(viewsets.ViewSet):
                 "code": 502,
                 "data": {"detail": str(e)}
             }, status=502)
-
-
-def decode_polyline(encoded, precision=1e5):
-    coords = []
-    index, lat, lng = 0, 0, 0
-    while index < len(encoded):
-        result, shift = 0, 0
-        while True:
-            b = ord(encoded[index]) - 63
-            index += 1
-            result |= (b & 0x1f) << shift
-            shift += 5
-            if b < 0x20:
-                break
-        dlat = ~(result >> 1) if result & 1 else (result >> 1)
-        lat += dlat
-
-        result, shift = 0, 0
-        while True:
-            b = ord(encoded[index]) - 63
-            index += 1
-            result |= (b & 0x1f) << shift
-            shift += 5
-            if b < 0x20:
-                break
-        dlng = ~(result >> 1) if result & 1 else (result >> 1)
-        lng += dlng
-
-        coords.append([lat / precision, lng / precision])
-    return coords
