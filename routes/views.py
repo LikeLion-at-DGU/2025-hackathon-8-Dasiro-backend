@@ -85,7 +85,12 @@ class KakaoProxyViewSet(viewsets.ViewSet):
         avoid_radius_m = int(request.data.get("avoid_radius_m", 200))
 
         if not origin or not destination:
-            return Response({"status": "error", "message": "출발/도착 좌표 누락", "code": 400}, status=400)
+            return Response({
+                "status": "error",
+                "message": "출발/도착 좌표 누락",
+                "code": 400,
+                "data": {"detail": "origin, destination required"}
+            }, status=400)
 
         headers = {"Authorization": f"KakaoAK {settings.KAKAO_REST_KEY}"}
         routes = []
@@ -113,12 +118,8 @@ class KakaoProxyViewSet(viewsets.ViewSet):
                         break
                 if not too_close:
                     safe_path.append([lat, lng])
-                else:
-                    # 사고 반경 근처는 건너뛰되 앞뒤 경로는 유지하게끔 로직 변경
-                    if safe_path and safe_path[-1] != [lat, lng]:
-                        safe_path.append(safe_path[-1])
             return safe_path or path
-        
+
         try:
             car_url = f"{settings.KAKAO_API_BASE}/v1/directions"
             car_params = {
@@ -140,30 +141,12 @@ class KakaoProxyViewSet(viewsets.ViewSet):
                 "polyline": car_path
             })
         except Exception as e:
-            return Response({"status": "error", "message": "차량 경로 계산 실패", "code": 502, "data": {"detail": str(e)}}, status=502)
-
-        try:
-            walk_url = f"{settings.KAKAO_API_BASE}/v1/directions/walk"
-            walk_params = {
-                "origin": f"{origin['lng']},{origin['lat']}",
-                "destination": f"{destination['lng']},{destination['lat']}"
-            }
-            walk_resp = requests.get(walk_url, headers=headers, params=walk_params, timeout=settings.KAKAO_TIMEOUT)
-            walk_resp.raise_for_status()
-            walk_data = walk_resp.json()
-
-            walk_path = extract_path(walk_data)
-            walk_path = filter_safe_path(walk_path)
-
-            walk_summary = walk_data.get("routes", [])[0].get("summary", {})
-            routes.append({
-                "mode": "walk",
-                "duration_sec": walk_summary.get("duration", 0),
-                "distance_m": walk_summary.get("distance", 0),
-                "polyline": walk_path
-            })
-        except Exception as e:
-            return Response({"status": "error", "message": "도보 경로 계산 실패", "code": 502, "data": {"detail": str(e)}}, status=502)
+            return Response({
+                "status": "error",
+                "message": "차량 경로 계산 실패",
+                "code": 502,
+                "data": {"detail": str(e)}
+            }, status=502)
 
         return Response({
             "status": "success",
