@@ -31,9 +31,9 @@ class PlaceViewSet(viewsets.ViewSet):
                     "code": 400,
                     "data": {"detail": "category must be one of FOOD, CAFE, CONVENIENCE"}
                 }, status=status.HTTP_400_BAD_REQUEST)
-            category_code = CATEGORY_MAP[category]
+            category_codes = [CATEGORY_MAP[category]]
         else:
-            category_code = "FD6,CE7,CS2"
+            category_codes = ["FD6", "CE7", "CS2"]
 
         kakao_url = "https://dapi.kakao.com/v2/local/search/category.json"
         headers = {"Authorization": f"KakaoAK {settings.KAKAO_REST_KEY}"}
@@ -58,38 +58,39 @@ class PlaceViewSet(viewsets.ViewSet):
 
         incidents = RecoveryIncident.objects.filter(status=RecoveryIncident.RecoveryStatus.RECOVERED)
         for incident in incidents:
-            params = {
-                "category_group_code": category_code,
-                "x": float(incident.lng),
-                "y": float(incident.lat),
-                "radius": 200
-            }
-            resp = requests.get(kakao_url, headers=headers, params=params)
-            if resp.status_code != 200:
-                continue
-
-            docs = resp.json().get("documents", [])
-            for doc in docs:
-                kakao_place_id = doc["id"]
-
-                coupons = Coupon.objects.filter(
-                    place__kakao_place_id=kakao_place_id,
-                    is_active=True
-                ).values("id", "title", "starts_at", "ends_at")
-
-                place = {
-                    "name": doc["place_name"],
-                    "address": doc["road_address_name"] or doc["address_name"],
-                    "lat": float(doc["y"]),
-                    "lng": float(doc["x"]),
-                    "category": category if category else "OTHER",
-                    "main_image_url": CATEGORY_IMAGES.get(category, None),
-                    "kakao_place_id": kakao_place_id,
-                    "kakao_url": doc["place_url"],
-                    "distance_m": None,
-                    "coupons": list(coupons),
+            for code in category_codes:
+                params = {
+                    "category_group_code": code,
+                    "x": float(incident.lng),
+                    "y": float(incident.lat),
+                    "radius": 200
                 }
-                candidate_places.append(place)
+                resp = requests.get(kakao_url, headers=headers, params=params)
+                if resp.status_code != 200:
+                    continue
+
+                docs = resp.json().get("documents", [])
+                for doc in docs:
+                    kakao_place_id = doc["id"]
+
+                    coupons = Coupon.objects.filter(
+                        place__kakao_place_id=kakao_place_id,
+                        is_active=True
+                    ).values("id", "title", "starts_at", "ends_at")
+
+                    place = {
+                        "name": doc["place_name"],
+                        "address": doc["road_address_name"] or doc["address_name"],
+                        "lat": float(doc["y"]),
+                        "lng": float(doc["x"]),
+                        "category": category if category else code,
+                        "main_image_url": CATEGORY_IMAGES.get(category, None),
+                        "kakao_place_id": kakao_place_id,
+                        "kakao_url": doc["place_url"],
+                        "distance_m": None,
+                        "coupons": list(coupons),
+                    }
+                    candidate_places.append(place)
 
         if user_lat and user_lng:
             user_lat = float(user_lat)
@@ -97,7 +98,7 @@ class PlaceViewSet(viewsets.ViewSet):
             filtered = []
             for place in candidate_places:
                 dist = haversine(user_lat, user_lng, place["lat"], place["lng"])
-                if dist <= 1000:  # 1km 이내만
+                if dist <= 1000:
                     place["distance_m"] = int(dist)
                     filtered.append(place)
             candidate_places = filtered
