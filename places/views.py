@@ -124,7 +124,7 @@ class PlaceViewSet(viewsets.ViewSet):
             filtered = []
             for place in candidate_places:
                 dist = haversine(user_lat, user_lng, place["lat"], place["lng"])
-                if dist <= 200:
+                if dist <= 1000:
                     place["distance_m"] = int(dist)
                     filtered.append(place)
             candidate_places = filtered
