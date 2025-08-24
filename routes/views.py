@@ -217,6 +217,7 @@ class ORSProxyViewSet(viewsets.ViewSet):
             "Content-Type": "application/json; charset=utf-8"
         }
 
+        # 회피 폴리곤 생성
         avoid_polygons = None
         if avoid_incidents:
             incidents = RecoveryIncident.objects.filter(status__in=avoid_status)
@@ -228,14 +229,14 @@ class ORSProxyViewSet(viewsets.ViewSet):
                     "coordinates": [p["coordinates"] for p in polygons]
                 }
 
+        # 좌표는 반드시 [lng, lat] 순서 + float 변환
         body = {
             "coordinates": [
-                [origin["lng"], origin["lat"]],
-                [destination["lng"], destination["lat"]],
+                [float(origin["lng"]), float(origin["lat"])],
+                [float(destination["lng"]), float(destination["lat"])],
             ],
             "elevation": True,
             "geometry": True,
-            "geometry_format": "polyline",
             "format": "json"
         }
         if avoid_polygons:
@@ -259,10 +260,10 @@ class ORSProxyViewSet(viewsets.ViewSet):
                 polyline = [[lat, lng] for lng, lat in geometry_data]
 
             RouteLog.objects.create(
-                origin_lat=origin["lat"],
-                origin_lng=origin["lng"],
-                dest_lat=destination["lat"],
-                dest_lng=destination["lng"],
+                origin_lat=float(origin["lat"]),
+                origin_lng=float(origin["lng"]),
+                dest_lat=float(destination["lat"]),
+                dest_lng=float(destination["lng"]),
                 mode="walk",
                 provider="ors",
                 duration_sec=int(summary["duration"]),
@@ -288,6 +289,7 @@ class ORSProxyViewSet(viewsets.ViewSet):
                 "code": 502,
                 "data": {"detail": str(e)}
             }, status=502)
+
 
 def decode_polyline(encoded, precision=1e5):
     coords = []
