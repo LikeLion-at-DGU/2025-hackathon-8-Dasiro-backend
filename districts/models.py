@@ -37,3 +37,19 @@ class DistrictMetric(models.Model):
         indexes = [
             models.Index(fields=["total_grade"]),
         ]
+
+class GuMetric(models.Model):
+    sigungu = models.CharField(max_length=50)
+    sido = models.CharField(max_length=50)
+    as_of_date = models.DateField()
+    total_grade = models.CharField(max_length=2, choices=DistrictMetric.RiskGrade.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("sigungu", "as_of_date")
+        indexes = [
+            models.Index(fields=["total_grade"]),
+        ]
+
+    def __str__(self):
+        return f"{self.sido} {self.sigungu} ({self.as_of_date}): {self.total_grade}"
