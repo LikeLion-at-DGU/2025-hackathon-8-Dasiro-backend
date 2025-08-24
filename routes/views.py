@@ -235,6 +235,7 @@ class ORSProxyViewSet(viewsets.ViewSet):
             ],
             "elevation": True,
             "geometry": True,
+            "geometry_format": "polyline",
             "format": "json"
         }
         if avoid_polygons:
@@ -250,11 +251,13 @@ class ORSProxyViewSet(viewsets.ViewSet):
             geometry_data = route["geometry"]
 
             if isinstance(geometry_data, str):
-                polyline = decode_polyline(geometry_data)
+                try:
+                    polyline = decode_polyline(geometry_data, precision=1e5)
+                except Exception:
+                    polyline = decode_polyline(geometry_data, precision=1e6)
             else:
                 polyline = [[lat, lng] for lng, lat in geometry_data]
 
-            # 로그 저장
             RouteLog.objects.create(
                 origin_lat=origin["lat"],
                 origin_lng=origin["lng"],
@@ -285,3 +288,32 @@ class ORSProxyViewSet(viewsets.ViewSet):
                 "code": 502,
                 "data": {"detail": str(e)}
             }, status=502)
+
+def decode_polyline(encoded, precision=1e5):
+    coords = []
+    index, lat, lng = 0, 0, 0
+    while index < len(encoded):
+        result, shift = 0, 0
+        while True:
+            b = ord(encoded[index]) - 63
+            index += 1
+            result |= (b & 0x1f) << shift
+            shift += 5
+            if b < 0x20:
+                break
+        dlat = ~(result >> 1) if result & 1 else (result >> 1)
+        lat += dlat
+
+        result, shift = 0, 0
+        while True:
+            b = ord(encoded[index]) - 63
+            index += 1
+            result |= (b & 0x1f) << shift
+            shift += 5
+            if b < 0x20:
+                break
+        dlng = ~(result >> 1) if result & 1 else (result >> 1)
+        lng += dlng
+
+        coords.append([lat / precision, lng / precision])
+    return coords
