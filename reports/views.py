@@ -1,3 +1,5 @@
+import requests
+
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -9,6 +11,7 @@ from uuid import uuid4
 from .models import CitizenReport, CitizenReportImage, BotMessage
 from .serializers import CitizenReportSerializer, CitizenReportCreateSerializer
 
+AI_BASE_URL = "http://52.78.104.121:8001"  # AI 서버 주소 추가
 
 def upload_to_s3(file):
     s3 = boto3.client(
@@ -84,22 +87,40 @@ class CitizenReportViewSet(viewsets.ViewSet):
         if not image_urls:
             return Response({"status": "error", "message": "분석할 이미지가 필요합니다."}, status=400)
 
-        # TODO: AI 서버 프록시 호출 → risk_score 수신
-        fake_score = 82
-        report.risk_score = fake_score
+        try:
+            resp = requests.post(
+                f"{AI_BASE_URL}/infer_batch",
+                json={"image_urls": image_urls},
+                timeout=10
+            )
+            resp.raise_for_status()
+            ai_data = resp.json()
+            risk_score = ai_data.get("risk_percent")
+        except Exception as e:
+            return Response({
+                "status": "error",
+                "message": f"AI 서버 호출 실패: {str(e)}",
+                "code": 500,
+                "data": {}
+            }, status=500)
+
+        report.risk_score = risk_score
         report.status = CitizenReport.ReportStatus.DONE
         report.save()
 
-        BotMessage.objects.create(report=report, role="bot", message=f"위험도 분석 결과: {fake_score}")
+        BotMessage.objects.create(
+            report=report,
+            role="bot",
+            message=f"위험도 분석 결과: {risk_score}"
+        )
 
-        response_data = {"risk_score": fake_score}
+        response_data = {"risk_score": risk_score}
 
-        #  50점 이상이면 자동 전송
-        if fake_score >= 50:
+        if risk_score and float(risk_score) >= 50:
             message = f"""
             [싱크홀 탐지 기반 서비스 '다시로' 제보 알림]
 
-            시민 제보가 접수되었으며, AI 분석 결과 위험 점수가 {fake_score}점으로 확인되었습니다.
+            시민 제보가 접수되었으며, AI 분석 결과 위험 점수가 {risk_score}점으로 확인되었습니다.
             아래 내용을 확인 바랍니다.
 
             📌 제보 내용
@@ -124,7 +145,9 @@ class CitizenReportViewSet(viewsets.ViewSet):
             )
 
             response_data["sent_to"] = "forestbin0420@dgu.ac.kr"
-            response_data["sent_at"] = report.updated_at.isoformat() if hasattr(report, "updated_at") else None
+            response_data["sent_at"] = (
+                report.updated_at.isoformat() if hasattr(report, "updated_at") else None
+            )
 
         return Response({
             "status": "success",
