@@ -1,8 +1,7 @@
 import requests
-import io
-
-from rest_framework import viewsets, status
+from rest_framework import viewsets
 from rest_framework.decorators import action
+from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.core.mail import send_mail
 from django.conf import settings
@@ -15,16 +14,42 @@ from .serializers import CitizenReportSerializer, CitizenReportCreateSerializer
 AI_BASE_URL = "http://52.78.104.121:8001"  # AI 서버 주소
 
 
-def upload_to_s3(file):
-    s3 = boto3.client(
-        "s3",
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-        region_name=settings.AWS_S3_REGION_NAME,
-    )
-    key = f"reports/{uuid4()}_{file.name}"
-    s3.upload_fileobj(file, settings.AWS_STORAGE_BUCKET_NAME, key)
-    return f"https://{settings.AWS_S3_CUSTOM_DOMAIN}/{key}"
+class S3PresignedURLView(APIView):
+    def post(self, request):
+        file_name = request.data.get("file_name")
+        file_type = request.data.get("file_type")
+
+        if not file_name or not file_type:
+            return Response({"status": "error", "message": "file_name, file_type 필요"}, status=400)
+
+        s3 = boto3.client(
+            "s3",
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_S3_REGION_NAME,
+        )
+
+        key = f"reports/{uuid4()}_{file_name}"
+
+        presigned_url = s3.generate_presigned_url(
+            ClientMethod="put_object",
+            Params={
+                "Bucket": settings.AWS_STORAGE_BUCKET_NAME,
+                "Key": key,
+                "ContentType": file_type,
+            },
+            ExpiresIn=3600,
+        )
+
+        return Response({
+            "status": "success",
+            "message": "Presigned URL 발급 성공",
+            "code": 200,
+            "data": {
+                "upload_url": presigned_url,
+                "file_url": f"https://{settings.AWS_STORAGE_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{key}"
+            }
+        })
 
 
 class CitizenReportViewSet(viewsets.ViewSet):
@@ -81,24 +106,26 @@ class CitizenReportViewSet(viewsets.ViewSet):
         except CitizenReport.DoesNotExist:
             return Response({"status": "error", "message": "제보 없음"}, status=404)
 
-        files = request.FILES.getlist("files")
-        if not files:
-            return Response({"status": "error", "message": "파일이 필요합니다."}, status=400)
+        image_urls = request.data.get("image_urls", [])
+        if not image_urls:
+            return Response({"status": "error", "message": "image_urls 필요"}, status=400)
 
-        if report.images.count() + len(files) > 3:
-            return Response({"status": "error", "message": "이미지는 최대 3장까지 업로드 가능합니다."}, status=400)
+        if report.images.count() + len(image_urls) > 3:
+            return Response({
+                "status": "error",
+                "message": "이미지는 최대 3장까지 업로드 가능합니다."
+            }, status=400)
 
-        uploaded_urls = []
-        for f in files:
-            url = upload_to_s3(f)
+        uploaded = []
+        for url in image_urls:
             img = CitizenReportImage.objects.create(report=report, image_url=url)
-            uploaded_urls.append(img.image_url)
+            uploaded.append(img.image_url)
 
         return Response({
             "status": "success",
-            "message": "이미지 업로드 성공",
+            "message": "이미지 URL 저장 성공",
             "code": 200,
-            "data": {"image_urls": uploaded_urls}
+            "data": {"image_urls": uploaded}
         })
 
     @action(detail=True, methods=["post"], url_path="analyze")
@@ -113,27 +140,15 @@ class CitizenReportViewSet(viewsets.ViewSet):
             return Response({"status": "error", "message": "분석할 이미지가 없습니다."}, status=400)
 
         try:
-            files = []
-            for url in image_urls:
-                r = requests.get(url, stream=True)
-                r.raise_for_status()
-                filename = url.split("/")[-1]
-                files.append(("images", (filename, io.BytesIO(r.content))))  # 안전하게 BytesIO 사용
-
             resp = requests.post(
-                f"{AI_BASE_URL}/infer_batch?agg=mean&lite=1",
+                f"{AI_BASE_URL}/infer_batch",
+                json={"image_urls": image_urls},
                 headers={"X-AI-Key": settings.AI_API_KEY},
-                files=files,
                 timeout=20
             )
-
-            print("AI resp status:", resp.status_code)
-            print("AI resp text:", resp.text)
-
             resp.raise_for_status()
             ai_data = resp.json()
             risk_score = ai_data.get("risk_percent")
-
         except Exception as e:
             return Response({
                 "status": "error",
