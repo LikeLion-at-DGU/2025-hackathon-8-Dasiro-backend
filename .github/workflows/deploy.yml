@@ -34,6 +34,7 @@ jobs:
           echo "EMAIL_HOST_USER=${{ secrets.EMAIL_HOST_USER }}" >> .env
           echo "EMAIL_HOST_PASSWORD=${{ secrets.EMAIL_HOST_PASSWORD }}" >> .env
           echo "AI_API_KEY=${{ secrets.AI_API_KEY }}" >> .env
+          echo "ORS_API_KEY=${{ secrets.ORS_API_KEY }}" >> .env
 
       - name: Install dependencies
         run: |

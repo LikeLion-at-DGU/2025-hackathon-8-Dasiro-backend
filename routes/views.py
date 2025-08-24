@@ -18,9 +18,23 @@ def haversine(lat1, lon1, lat2, lon2):
     return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
 
 
+def make_circle_polygon(lat, lng, radius_m=200, num_points=16):
+    coords = []
+    R = 6378137.0
+    for i in range(num_points):
+        angle = 2 * math.pi * i / num_points
+        dx = radius_m * math.cos(angle)
+        dy = radius_m * math.sin(angle)
+        dlat = (dy / R) * (180 / math.pi)
+        dlng = (dx / (R * math.cos(math.pi * lat / 180))) * (180 / math.pi)
+        coords.append([lng + dlng, lat + dlat])
+    coords.append(coords[0])
+    return {"type": "Polygon", "coordinates": [coords]}
+
+
 class KakaoProxyViewSet(viewsets.ViewSet):
 
-    @action(detail=False, methods=["get"], url_path="kakao/geocode")
+    @action(detail=False, methods=["get"], url_path="geocode")
     def geocode(self, request):
         query = request.query_params.get("query")
         if not query:
@@ -44,9 +58,10 @@ class KakaoProxyViewSet(viewsets.ViewSet):
             return Response({"status": "success", "message": "지오코딩 성공", "code": 200,
                             "data": {"items": items, "count": len(items)}})
         except Exception as e:
-            return Response({"status": "error", "message": "지오코딩 실패", "code": 502, "data": {"detail": str(e)}}, status=502)
+            return Response({"status": "error", "message": "지오코딩 실패", "code": 502,
+                            "data": {"detail": str(e)}}, status=502)
 
-    @action(detail=False, methods=["get"], url_path="kakao/reverse-geocode")
+    @action(detail=False, methods=["get"], url_path="reverse-geocode")
     def reverse_geocode(self, request):
         lat = request.query_params.get("lat")
         lng = request.query_params.get("lng")
@@ -74,9 +89,10 @@ class KakaoProxyViewSet(viewsets.ViewSet):
                 }
             })
         except Exception as e:
-            return Response({"status": "error", "message": "리버스 지오코딩 실패", "code": 502, "data": {"detail": str(e)}}, status=502)
+            return Response({"status": "error", "message": "리버스 지오코딩 실패", "code": 502,
+                            "data": {"detail": str(e)}}, status=502)
 
-    @action(detail=False, methods=["post"], url_path="kakao/safe-routes")
+    @action(detail=False, methods=["post"], url_path="safe-routes")
     def safe_routes(self, request):
         origin = request.data.get("origin")
         destination = request.data.get("destination")
@@ -85,12 +101,8 @@ class KakaoProxyViewSet(viewsets.ViewSet):
         avoid_radius_m = int(request.data.get("avoid_radius_m", 200))
 
         if not origin or not destination:
-            return Response({
-                "status": "error",
-                "message": "출발/도착 좌표 누락",
-                "code": 400,
-                "data": {"detail": "origin, destination required"}
-            }, status=400)
+            return Response({"status": "error", "message": "출발/도착 좌표 누락", "code": 400,
+                            "data": {"detail": "origin, destination required"}}, status=400)
 
         headers = {"Authorization": f"KakaoAK {settings.KAKAO_REST_KEY}"}
         routes = []
@@ -101,7 +113,7 @@ class KakaoProxyViewSet(viewsets.ViewSet):
                 for road in sec.get("roads", []):
                     v = road.get("vertexes", [])
                     for i in range(0, len(v), 2):
-                        path.append([v[i+1], v[i]])
+                        path.append([v[i + 1], v[i]])
             return path
 
         def filter_safe_path(path):
@@ -141,12 +153,8 @@ class KakaoProxyViewSet(viewsets.ViewSet):
                 "polyline": car_path
             })
         except Exception as e:
-            return Response({
-                "status": "error",
-                "message": "차량 경로 계산 실패",
-                "code": 502,
-                "data": {"detail": str(e)}
-            }, status=502)
+            return Response({"status": "error", "message": "차량 경로 계산 실패", "code": 502,
+                            "data": {"detail": str(e)}}, status=502)
 
         return Response({
             "status": "success",
@@ -154,3 +162,82 @@ class KakaoProxyViewSet(viewsets.ViewSet):
             "code": 200,
             "data": {"routes": routes}
         })
+
+
+class ORSProxyViewSet(viewsets.ViewSet):
+
+    @action(detail=False, methods=["post"], url_path="safe-routes")
+    def safe_routes(self, request):
+        origin = request.data.get("origin")
+        destination = request.data.get("destination")
+        avoid_incidents = request.data.get("avoid_incidents", True)
+        avoid_status = request.data.get("avoid_status", ["UNDER_REPAIR", "TEMP_REPAIRED"])
+        avoid_radius_m = int(request.data.get("avoid_radius_m", 200))
+
+        if not origin or not destination:
+            return Response({"status": "error", "message": "출발/도착 좌표 누락", "code": 400,
+                            "data": {"detail": "origin, destination required"}}, status=400)
+
+        url = f"{settings.ORS_BASE}/v2/directions/foot-walking/json"
+        headers = {
+            "Authorization": settings.ORS_API_KEY,
+            "Content-Type": "application/json; charset=utf-8"
+        }
+
+        # 회피할 싱크홀을 폴리곤으로 구성
+        avoid_polygons = None
+        if avoid_incidents:
+            incidents = RecoveryIncident.objects.filter(status__in=avoid_status)
+            polygons = [make_circle_polygon(float(inc.lat), float(inc.lng), avoid_radius_m)
+                        for inc in incidents]
+            if polygons:
+                avoid_polygons = {
+                    "type": "MultiPolygon",
+                    "coordinates": [p["coordinates"] for p in polygons]
+                }
+
+        body = {
+            "coordinates": [
+                [origin["lng"], origin["lat"]],
+                [destination["lng"], destination["lat"]],
+            ],
+            "elevation": True
+        }
+        if avoid_polygons:
+            body["avoid_polygons"] = avoid_polygons
+
+        try:
+            r = requests.post(url, headers=headers, json=body, timeout=settings.ORS_TIMEOUT)
+            r.raise_for_status()
+            data = r.json()
+
+            route = data["routes"][0]
+            summary = route["summary"]
+            geometry = route["geometry"]
+
+            RouteLog.objects.create(
+                origin_lat=origin["lat"],
+                origin_lng=origin["lng"],
+                dest_lat=destination["lat"],
+                dest_lng=destination["lng"],
+                mode="walk",
+                provider="ors",
+                duration_sec=int(summary["duration"]),
+                distance_m=int(summary["distance"]),
+                raw_response=data
+            )
+
+            return Response({
+                "status": "success",
+                "message": "안전 도보 경로 탐색 성공",
+                "code": 200,
+                "data": {
+                    "mode": "walk",
+                    "duration_sec": summary["duration"],
+                    "distance_m": summary["distance"],
+                    "geometry": geometry
+                }
+            })
+        except Exception as e:
+            return Response({"status": "error", "message": "openrouteservice 호출 실패",
+                            "code": 502, "data": {"detail": str(e)}}, status=502)
