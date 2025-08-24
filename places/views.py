@@ -23,8 +23,17 @@ class PlaceViewSet(viewsets.ViewSet):
         user_lat = request.query_params.get("lat")
         user_lng = request.query_params.get("lng")
         sigungu = request.query_params.get("sigungu")
-        page = request.query_params.get("page")
-        page_size = request.query_params.get("page_size")
+
+        try:
+            page = int(request.query_params.get("page", 1))
+            page_size = int(request.query_params.get("page_size", 20))
+        except ValueError:
+            return Response({
+                "status": "error",
+                "message": "page, page_size 값이 올바르지 않습니다.",
+                "code": 400,
+                "data": {}
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         if category:
             if category not in CATEGORY_MAP:
@@ -101,17 +110,24 @@ class PlaceViewSet(viewsets.ViewSet):
             filtered = []
             for place in candidate_places:
                 dist = haversine(user_lat, user_lng, place["lat"], place["lng"])
-                if dist <= 100:
+                if dist <= 200:
                     place["distance_m"] = int(dist)
                     filtered.append(place)
             candidate_places = filtered
+
+        total_count = len(candidate_places)
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated_places = candidate_places[start:end]
 
         return Response({
             "status": "success",
             "message": "상점 목록 조회 성공",
             "code": 200,
             "data": {
-                "items": candidate_places,
-                "visible_count": len(candidate_places)
+                "items": paginated_places,
+                "count": total_count,
+                "page": page,
+                "page_size": page_size
             }
         }, status=status.HTTP_200_OK)
