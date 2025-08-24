@@ -32,6 +32,36 @@ def make_circle_polygon(lat, lng, radius_m=200, num_points=16):
     return {"type": "Polygon", "coordinates": [coords]}
 
 
+def decode_polyline(encoded):
+    coords = []
+    index, lat, lng = 0, 0, 0
+    while index < len(encoded):
+        result, shift = 0, 0
+        while True:
+            b = ord(encoded[index]) - 63
+            index += 1
+            result |= (b & 0x1f) << shift
+            shift += 5
+            if b < 0x20:
+                break
+        dlat = ~(result >> 1) if result & 1 else (result >> 1)
+        lat += dlat
+
+        result, shift = 0, 0
+        while True:
+            b = ord(encoded[index]) - 63
+            index += 1
+            result |= (b & 0x1f) << shift
+            shift += 5
+            if b < 0x20:
+                break
+        dlng = ~(result >> 1) if result & 1 else (result >> 1)
+        lng += dlng
+
+        coords.append([lat / 1e5, lng / 1e5])
+    return coords
+
+
 class KakaoProxyViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["get"], url_path="geocode")
@@ -184,7 +214,6 @@ class ORSProxyViewSet(viewsets.ViewSet):
             "Content-Type": "application/json; charset=utf-8"
         }
 
-        # 회피할 싱크홀을 폴리곤으로 구성
         avoid_polygons = None
         if avoid_incidents:
             incidents = RecoveryIncident.objects.filter(status__in=avoid_status)
@@ -213,7 +242,8 @@ class ORSProxyViewSet(viewsets.ViewSet):
 
             route = data["routes"][0]
             summary = route["summary"]
-            geometry = route["geometry"]
+            geometry_encoded = route["geometry"]
+            geometry_decoded = decode_polyline(geometry_encoded)
 
             RouteLog.objects.create(
                 origin_lat=origin["lat"],
@@ -235,7 +265,7 @@ class ORSProxyViewSet(viewsets.ViewSet):
                     "mode": "walk",
                     "duration_sec": summary["duration"],
                     "distance_m": summary["distance"],
-                    "geometry": geometry
+                    "polyline": geometry_decoded
                 }
             })
         except Exception as e:
