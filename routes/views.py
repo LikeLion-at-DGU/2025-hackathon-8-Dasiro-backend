@@ -32,37 +32,6 @@ def make_circle_polygon(lat, lng, radius_m=200, num_points=16):
     return {"type": "Polygon", "coordinates": [coords]}
 
 
-def decode_polyline(encoded, precision=6):
-    coords = []
-    index, lat, lng = 0, 0, 0
-    factor = 10 ** precision
-    while index < len(encoded):
-        result, shift = 0, 0
-        while True:
-            b = ord(encoded[index]) - 63
-            index += 1
-            result |= (b & 0x1f) << shift
-            shift += 5
-            if b < 0x20:
-                break
-        dlat = ~(result >> 1) if result & 1 else (result >> 1)
-        lat += dlat
-
-        result, shift = 0, 0
-        while True:
-            b = ord(encoded[index]) - 63
-            index += 1
-            result |= (b & 0x1f) << shift
-            shift += 5
-            if b < 0x20:
-                break
-        dlng = ~(result >> 1) if result & 1 else (result >> 1)
-        lng += dlng
-
-        coords.append([lat / factor, lng / factor])
-    return coords
-
-
 class KakaoProxyViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["get"], url_path="geocode")
@@ -123,77 +92,6 @@ class KakaoProxyViewSet(viewsets.ViewSet):
             return Response({"status": "error", "message": "리버스 지오코딩 실패", "code": 502,
                             "data": {"detail": str(e)}}, status=502)
 
-    @action(detail=False, methods=["post"], url_path="safe-routes")
-    def safe_routes(self, request):
-        origin = request.data.get("origin")
-        destination = request.data.get("destination")
-        avoid_incidents = request.data.get("avoid_incidents", True)
-        avoid_status = request.data.get("avoid_status", ["UNDER_REPAIR", "TEMP_REPAIRED"])
-        avoid_radius_m = int(request.data.get("avoid_radius_m", 200))
-
-        if not origin or not destination:
-            return Response({"status": "error", "message": "출발/도착 좌표 누락", "code": 400,
-                            "data": {"detail": "origin, destination required"}}, status=400)
-
-        headers = {"Authorization": f"KakaoAK {settings.KAKAO_REST_KEY}"}
-        routes = []
-
-        def extract_path(route_data):
-            path = []
-            for sec in route_data.get("routes", [])[0].get("sections", []):
-                for road in sec.get("roads", []):
-                    v = road.get("vertexes", [])
-                    for i in range(0, len(v), 2):
-                        path.append([v[i + 1], v[i]])
-            return path
-
-        def filter_safe_path(path):
-            if not avoid_incidents:
-                return path
-            incidents = RecoveryIncident.objects.filter(status__in=avoid_status)
-            safe_path = []
-            for lat, lng in path:
-                too_close = False
-                for inc in incidents:
-                    dist = haversine(lat, lng, float(inc.lat), float(inc.lng))
-                    if dist <= avoid_radius_m:
-                        too_close = True
-                        break
-                if not too_close:
-                    safe_path.append([lat, lng])
-            return safe_path or path
-
-        try:
-            car_url = f"{settings.KAKAO_API_BASE}/v1/directions"
-            car_params = {
-                "origin": f"{origin['lng']},{origin['lat']}",
-                "destination": f"{destination['lng']},{destination['lat']}"
-            }
-            car_resp = requests.get(car_url, headers=headers, params=car_params, timeout=settings.KAKAO_TIMEOUT)
-            car_resp.raise_for_status()
-            car_data = car_resp.json()
-
-            car_path = extract_path(car_data)
-            car_path = filter_safe_path(car_path)
-
-            car_summary = car_data.get("routes", [])[0].get("summary", {})
-            routes.append({
-                "mode": "car",
-                "duration_sec": car_summary.get("duration", 0),
-                "distance_m": car_summary.get("distance", 0),
-                "polyline": car_path
-            })
-        except Exception as e:
-            return Response({"status": "error", "message": "차량 경로 계산 실패", "code": 502,
-                            "data": {"detail": str(e)}}, status=502)
-
-        return Response({
-            "status": "success",
-            "message": "안전 경로 탐색 성공",
-            "code": 200,
-            "data": {"routes": routes}
-        })
-
 
 class ORSProxyViewSet(viewsets.ViewSet):
 
@@ -213,7 +111,7 @@ class ORSProxyViewSet(viewsets.ViewSet):
                 "data": {"detail": "origin, destination required"}
             }, status=400)
 
-        url = f"{settings.ORS_BASE}/v2/directions/foot-walking/json"
+        url = f"{settings.ORS_BASE}/v2/directions/foot-walking/geojson"
         headers = {
             "Authorization": settings.ORS_API_KEY,
             "Content-Type": "application/json; charset=utf-8"
@@ -237,7 +135,7 @@ class ORSProxyViewSet(viewsets.ViewSet):
             ],
             "elevation": True,
             "geometry": True,
-            "format": "json"
+            "format": "geojson"
         }
         if avoid_polygons:
             body["avoid_polygons"] = avoid_polygons
@@ -247,7 +145,7 @@ class ORSProxyViewSet(viewsets.ViewSet):
             r.raise_for_status()
             data = r.json()
 
-            if not data.get("routes"):
+            if not data.get("features"):
                 return Response({
                     "status": "error",
                     "message": "경로를 찾을 수 없음",
@@ -255,31 +153,17 @@ class ORSProxyViewSet(viewsets.ViewSet):
                     "data": data.get("error", {})
                 }, status=404)
 
-            route = data["routes"][0]
-            summary = route.get("summary", {})
-            geometry_data = route.get("geometry")
+            feature = data["features"][0]
+            summary = feature.get("properties", {}).get("summary", {})
+            geometry_data = feature.get("geometry", {})
 
-            if isinstance(geometry_data, str):
-                try:
-                    polyline = decode_polyline(geometry_data)
-                except Exception:
-                    return Response({
-                        "status": "error",
-                        "message": "polyline 디코딩 실패",
-                        "code": 502,
-                        "data": {"geometry": geometry_data}
-                    }, status=502)
-            elif isinstance(geometry_data, list):
-                polyline = [[lat, lng] for lng, lat in geometry_data]
-            else:
-                return Response({
-                    "status": "error",
-                    "message": "geometry 포맷 알 수 없음",
-                    "code": 502,
-                    "data": {"geometry": geometry_data}
-                }, status=502)
+            # 고도(elevation) 값이 포함되어 있어도 lat/lng만 추출하게끔 변경
+            polyline = []
+            for coord in geometry_data.get("coordinates", []):
+                if len(coord) >= 2:
+                    lng, lat = coord[0], coord[1]
+                    polyline.append([lat, lng])
 
-            # 로그 저장
             RouteLog.objects.create(
                 origin_lat=float(origin["lat"]),
                 origin_lng=float(origin["lng"]),
