@@ -193,7 +193,6 @@ class KakaoProxyViewSet(viewsets.ViewSet):
             "data": {"routes": routes}
         })
 
-
 class ORSProxyViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["post"], url_path="safe-routes")
@@ -205,8 +204,12 @@ class ORSProxyViewSet(viewsets.ViewSet):
         avoid_radius_m = int(request.data.get("avoid_radius_m", 200))
 
         if not origin or not destination:
-            return Response({"status": "error", "message": "출발/도착 좌표 누락", "code": 400,
-                            "data": {"detail": "origin, destination required"}}, status=400)
+            return Response({
+                "status": "error",
+                "message": "출발/도착 좌표 누락",
+                "code": 400,
+                "data": {"detail": "origin, destination required"}
+            }, status=400)
 
         url = f"{settings.ORS_BASE}/v2/directions/foot-walking/json"
         headers = {
@@ -230,7 +233,9 @@ class ORSProxyViewSet(viewsets.ViewSet):
                 [origin["lng"], origin["lat"]],
                 [destination["lng"], destination["lat"]],
             ],
-            "elevation": True
+            "elevation": True,
+            "geometry": True,
+            "format": "json"
         }
         if avoid_polygons:
             body["avoid_polygons"] = avoid_polygons
@@ -242,9 +247,14 @@ class ORSProxyViewSet(viewsets.ViewSet):
 
             route = data["routes"][0]
             summary = route["summary"]
-            geometry_encoded = route["geometry"]
-            geometry_decoded = decode_polyline(geometry_encoded)
+            geometry_data = route["geometry"]
 
+            if isinstance(geometry_data, str):
+                polyline = decode_polyline(geometry_data)
+            else:
+                polyline = [[lat, lng] for lng, lat in geometry_data]
+
+            # 로그 저장
             RouteLog.objects.create(
                 origin_lat=origin["lat"],
                 origin_lng=origin["lng"],
@@ -265,9 +275,13 @@ class ORSProxyViewSet(viewsets.ViewSet):
                     "mode": "walk",
                     "duration_sec": summary["duration"],
                     "distance_m": summary["distance"],
-                    "polyline": geometry_decoded
+                    "polyline": polyline
                 }
             })
         except Exception as e:
-            return Response({"status": "error", "message": "openrouteservice 호출 실패",
-                            "code": 502, "data": {"detail": str(e)}}, status=502)
+            return Response({
+                "status": "error",
+                "message": "openrouteservice 호출 실패",
+                "code": 502,
+                "data": {"detail": str(e)}
+            }, status=502)
