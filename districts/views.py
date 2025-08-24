@@ -39,20 +39,66 @@ class DistrictViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["get"], url_path="search")
     def search_districts(self, request):
-        q = request.GET.get("q", "")
-        qs = District.objects.filter(dong__icontains=q)[:20]
+        q = request.GET.get("q", "").strip()
+        sido = request.GET.get("sido")
+        sigungu = request.GET.get("sigungu")
+        try:
+            limit = int(request.GET.get("limit", 20))
+        except ValueError:
+            limit = 20
+        limit = min(limit, 50)
 
-        data = [
-            {
-                "id": d.id,
-                "sido": d.sido,
-                "sigungu": d.sigungu,
-                "dong": d.dong,
-                "center_lat": float(d.center_lat),
-                "center_lng": float(d.center_lng),
-            }
-            for d in qs
-        ]
+        if not q:
+            return Response({
+                "status": "error",
+                "message": "검색어가 필요합니다",
+                "code": 400,
+                "data": {"detail": "q required (min length 1)"}
+            }, status=400)
+
+        qs = District.objects.all()
+        qs = qs.filter(dong__icontains=q)
+        if sido:
+            qs = qs.filter(sido=sido)
+        if sigungu:
+            qs = qs.filter(sigungu=sigungu)
+        qs = qs[:limit]
+
+        data = []
+        for d in qs:
+            latest_metric = DistrictMetric.objects.filter(district=d).order_by("-as_of_date").first()
+            if latest_metric:
+                data.append({
+                    "id": d.id,
+                    "sido": d.sido,
+                    "sigungu": d.sigungu,
+                    "dong": d.dong,
+                    "center_lat": float(d.center_lat),
+                    "center_lng": float(d.center_lng),
+                    "is_safezone": d.is_safezone,
+                    "total_grade": latest_metric.total_grade,
+                    "ground_stability": latest_metric.ground_stability,
+                    "groundwater_impact": latest_metric.groundwater_impact,
+                    "underground_density": latest_metric.underground_density,
+                    "old_building_dist": latest_metric.old_building_dist,
+                    "incident_history": latest_metric.incident_history,
+                })
+            else:
+                data.append({
+                    "id": d.id,
+                    "sido": d.sido,
+                    "sigungu": d.sigungu,
+                    "dong": d.dong,
+                    "center_lat": float(d.center_lat),
+                    "center_lng": float(d.center_lng),
+                    "is_safezone": d.is_safezone,
+                    "total_grade": None,e
+                    "ground_stability": None,
+                    "groundwater_impact": None,
+                    "underground_density": None,
+                    "old_building_dist": None,
+                    "incident_history": None,
+                })
 
         return Response({
             "status": "success",
@@ -60,6 +106,7 @@ class DistrictViewSet(viewsets.ViewSet):
             "code": 200,
             "data": {"items": data, "count": len(data)}
         })
+
 
     @action(detail=True, methods=["get"], url_path="metrics")
     def district_metrics(self, request, pk=None):
