@@ -32,9 +32,10 @@ def make_circle_polygon(lat, lng, radius_m=200, num_points=16):
     return {"type": "Polygon", "coordinates": [coords]}
 
 
-def decode_polyline(encoded):
+def decode_polyline(encoded, precision=6):
     coords = []
     index, lat, lng = 0, 0, 0
+    factor = 10 ** precision
     while index < len(encoded):
         result, shift = 0, 0
         while True:
@@ -58,7 +59,7 @@ def decode_polyline(encoded):
         dlng = ~(result >> 1) if result & 1 else (result >> 1)
         lng += dlng
 
-        coords.append([lat / 1e5, lng / 1e5])
+        coords.append([lat / factor, lng / factor])
     return coords
 
 
@@ -192,6 +193,7 @@ class KakaoProxyViewSet(viewsets.ViewSet):
             "code": 200,
             "data": {"routes": routes}
         })
+
 
 class ORSProxyViewSet(viewsets.ViewSet):
 
