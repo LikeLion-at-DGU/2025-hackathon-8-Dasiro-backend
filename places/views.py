@@ -16,13 +16,11 @@ CATEGORY_MAP = {
     "CONVENIENCE": "CS2",
 }
 
-
 class PlaceViewSet(viewsets.ViewSet):
     def list(self, request):
         category = request.query_params.get("category")  # FOOD, CAFE, CONVENIENCE
         user_lat = request.query_params.get("lat")
         user_lng = request.query_params.get("lng")
-        sigungu = request.query_params.get("sigungu")
 
         try:
             page = int(request.query_params.get("page", 1))
@@ -50,11 +48,13 @@ class PlaceViewSet(viewsets.ViewSet):
         kakao_url = "https://dapi.kakao.com/v2/local/search/category.json"
         headers = {"Authorization": f"KakaoAK {settings.KAKAO_REST_KEY}"}
 
+        # DB 기반 상점 먼저 불러오기
         candidate_places = []
-
         db_places = Place.objects.all()
         for p in db_places:
-            coupons = Coupon.objects.filter(place=p, is_active=True).values("id", "title", "starts_at", "ends_at")
+            coupons = Coupon.objects.filter(
+                place=p, is_active=True
+            ).values("id", "title", "starts_at", "ends_at")
             candidate_places.append({
                 "name": p.name,
                 "address": p.address,
@@ -68,14 +68,17 @@ class PlaceViewSet(viewsets.ViewSet):
                 "coupons": list(coupons),
             })
 
-        incidents = RecoveryIncident.objects.filter(status=RecoveryIncident.RecoveryStatus.RECOVERED)
+        # 카카오 API 기반 상점 가져오기 + DB 캐싱
+        incidents = RecoveryIncident.objects.filter(
+            status=RecoveryIncident.RecoveryStatus.RECOVERED
+        )
         for incident in incidents:
             for code in category_codes:
                 params = {
                     "category_group_code": code,
                     "x": float(incident.lng),
                     "y": float(incident.lat),
-                    "radius": 50
+                    "radius": 50,
                 }
                 resp = requests.get(kakao_url, headers=headers, params=params)
                 if resp.status_code != 200:
@@ -85,24 +88,35 @@ class PlaceViewSet(viewsets.ViewSet):
                 for doc in docs:
                     kakao_place_id = doc["id"]
 
+                    place_obj, created = Place.objects.get_or_create(
+                        kakao_place_id=kakao_place_id,
+                        defaults={
+                            "name": doc["place_name"],
+                            "address": doc["road_address_name"] or doc["address_name"],
+                            "lat": float(doc["y"]),
+                            "lng": float(doc["x"]),
+                            "category": category if category else code,
+                            "image_url": CATEGORY_IMAGES.get(category, None),
+                            "place_url": doc["place_url"],
+                        }
+                    )
+
                     coupons = Coupon.objects.filter(
-                        place__kakao_place_id=kakao_place_id,
-                        is_active=True
+                        place=place_obj, is_active=True
                     ).values("id", "title", "starts_at", "ends_at")
 
-                    place = {
-                        "name": doc["place_name"],
-                        "address": doc["road_address_name"] or doc["address_name"],
-                        "lat": float(doc["y"]),
-                        "lng": float(doc["x"]),
-                        "category": category if category else code,
-                        "main_image_url": CATEGORY_IMAGES.get(category, None),
-                        "kakao_place_id": kakao_place_id,
-                        "kakao_url": doc["place_url"],
+                    candidate_places.append({
+                        "name": place_obj.name,
+                        "address": place_obj.address,
+                        "lat": float(place_obj.lat),
+                        "lng": float(place_obj.lng),
+                        "category": place_obj.category,
+                        "main_image_url": place_obj.image_url or CATEGORY_IMAGES.get(place_obj.category, None),
+                        "kakao_place_id": place_obj.kakao_place_id,
+                        "kakao_url": place_obj.place_url,
                         "distance_m": None,
                         "coupons": list(coupons),
-                    }
-                    candidate_places.append(place)
+                    })
 
         if user_lat and user_lng:
             user_lat = float(user_lat)
