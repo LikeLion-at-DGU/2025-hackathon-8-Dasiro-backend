@@ -66,7 +66,7 @@ class PlaceViewSet(viewsets.ViewSet):
                     "category_group_code": code,
                     "x": float(incident.lng),
                     "y": float(incident.lat),
-                    "radius": 100
+                    "radius": 1
                 }
                 resp = requests.get(kakao_url, headers=headers, params=params)
                 if resp.status_code != 200:
@@ -101,7 +101,7 @@ class PlaceViewSet(viewsets.ViewSet):
             filtered = []
             for place in candidate_places:
                 dist = haversine(user_lat, user_lng, place["lat"], place["lng"])
-                if dist <= 500:
+                if dist <= 100:
                     place["distance_m"] = int(dist)
                     filtered.append(place)
             candidate_places = filtered
@@ -112,6 +112,6 @@ class PlaceViewSet(viewsets.ViewSet):
             "code": 200,
             "data": {
                 "items": candidate_places,
-                "count": len(candidate_places)
+                "visible_count": len(candidate_places)
             }
         }, status=status.HTTP_200_OK)
