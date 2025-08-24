@@ -66,7 +66,7 @@ class PlaceViewSet(viewsets.ViewSet):
                     "category_group_code": code,
                     "x": float(incident.lng),
                     "y": float(incident.lat),
-                    "radius": 1
+                    "radius": 5
                 }
                 resp = requests.get(kakao_url, headers=headers, params=params)
                 if resp.status_code != 200:
