@@ -140,15 +140,36 @@ class CitizenReportViewSet(viewsets.ViewSet):
             return Response({"status": "error", "message": "분석할 이미지가 없습니다."}, status=400)
 
         try:
+            files = []
+            for url in image_urls[:3]:
+                img_resp = requests.get(url, timeout=10)
+                if img_resp.status_code == 200:
+                    filename = url.split("/")[-1]
+                    files.append(("images", (filename, img_resp.content, "image/jpeg")))
+
+            if not files:
+                return Response({
+                    "status": "error",
+                    "message": "이미지를 불러올 수 없습니다.",
+                    "code": 400,
+                    "data": {}
+                }, status=400)
+
             resp = requests.post(
                 f"{AI_BASE_URL}/infer_batch",
-                json={"image_urls": image_urls},
+                files=files,
+                data={
+                    "lite": 1,   
+                    "agg": "max"
+                },
                 headers={"X-AI-Key": settings.AI_API_KEY},
-                timeout=20
+                timeout=30
             )
             resp.raise_for_status()
             ai_data = resp.json()
-            risk_score = ai_data.get("risk_percent")
+
+            risk_score = ai_data.get("risk_percent") or ai_data.get("combined_risk_percent")
+
         except Exception as e:
             return Response({
                 "status": "error",
@@ -169,7 +190,6 @@ class CitizenReportViewSet(viewsets.ViewSet):
 
         response_data = {"risk_score": risk_score}
 
-        # 위험도 50 이상이면 이메일 발송
         if risk_score and float(risk_score) >= 50:
             message = f"""
             [싱크홀 탐지 기반 서비스 '다시로' 제보 알림]
@@ -199,9 +219,6 @@ class CitizenReportViewSet(viewsets.ViewSet):
                     recipient_list=["forestbin0420@dgu.ac.kr"],
                 )
                 response_data["sent_to"] = "forestbin0420@dgu.ac.kr"
-                response_data["sent_at"] = (
-                    report.updated_at.isoformat() if hasattr(report, "updated_at") else None
-                )
             except Exception as e:
                 response_data["mail_error"] = str(e)
 
