@@ -22,6 +22,9 @@ class PlaceViewSet(viewsets.ViewSet):
         category = request.query_params.get("category")  # FOOD, CAFE, CONVENIENCE
         user_lat = request.query_params.get("lat")
         user_lng = request.query_params.get("lng")
+        sigungu = request.query_params.get("sigungu")
+        page = request.query_params.get("page")
+        page_size = request.query_params.get("page_size")
 
         if category:
             if category not in CATEGORY_MAP:
