@@ -91,7 +91,85 @@ class KakaoProxyViewSet(viewsets.ViewSet):
         except Exception as e:
             return Response({"status": "error", "message": "리버스 지오코딩 실패", "code": 502,
                             "data": {"detail": str(e)}}, status=502)
+            
+    @action(detail=False, methods=["post"], url_path="safe-routes")
+    def safe_routes(self, request):
+        origin = request.data.get("origin")
+        destination = request.data.get("destination")
+        avoid_incidents = request.data.get("avoid_incidents", True)
+        avoid_status = request.data.get("avoid_status", ["UNDER_REPAIR", "TEMP_REPAIRED"])
+        avoid_radius_m = int(request.data.get("avoid_radius_m", 200))
 
+        if not origin or not destination:
+            return Response({
+                "status": "error",
+                "message": "출발/도착 좌표 누락",
+                "code": 400,
+                "data": {"detail": "origin, destination required"}
+            }, status=400)
+
+        headers = {"Authorization": f"KakaoAK {settings.KAKAO_REST_KEY}"}
+        routes = []
+
+        def extract_path(route_data):
+            path = []
+            for sec in route_data.get("routes", [])[0].get("sections", []):
+                for road in sec.get("roads", []):
+                    v = road.get("vertexes", [])
+                    for i in range(0, len(v), 2):
+                        path.append([v[i + 1], v[i]])
+            return path
+
+        def filter_safe_path(path):
+            if not avoid_incidents:
+                return path
+            incidents = RecoveryIncident.objects.filter(status__in=avoid_status)
+            safe_path = []
+            for lat, lng in path:
+                too_close = False
+                for inc in incidents:
+                    dist = haversine(lat, lng, float(inc.lat), float(inc.lng))
+                    if dist <= avoid_radius_m:
+                        too_close = True
+                        break
+                if not too_close:
+                    safe_path.append([lat, lng])
+            return safe_path or path
+
+        try:
+            car_url = f"{settings.KAKAO_API_BASE}/v1/directions"
+            car_params = {
+                "origin": f"{origin['lng']},{origin['lat']}",
+                "destination": f"{destination['lng']},{destination['lat']}"
+            }
+            car_resp = requests.get(car_url, headers=headers, params=car_params, timeout=settings.KAKAO_TIMEOUT)
+            car_resp.raise_for_status()
+            car_data = car_resp.json()
+
+            car_path = extract_path(car_data)
+            car_path = filter_safe_path(car_path)
+
+            car_summary = car_data.get("routes", [])[0].get("summary", {})
+            routes.append({
+                "mode": "car",
+                "duration_sec": car_summary.get("duration", 0),
+                "distance_m": car_summary.get("distance", 0),
+                "polyline": car_path
+            })
+        except Exception as e:
+            return Response({
+                "status": "error",
+                "message": "차량 경로 계산 실패",
+                "code": 502,
+                "data": {"detail": str(e)}
+            }, status=502)
+
+        return Response({
+            "status": "success",
+            "message": "안전 경로 탐색 성공",
+            "code": 200,
+            "data": {"routes": routes}
+        })
 
 class ORSProxyViewSet(viewsets.ViewSet):
 
