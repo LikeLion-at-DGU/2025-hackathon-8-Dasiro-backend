@@ -1,9 +1,14 @@
 from rest_framework.routers import SimpleRouter
-from .views import CitizenReportViewSet
+from django.urls import path
+from .views import CitizenReportViewSet, S3PresignedURLView
 
 app_name = "reports"
 
 router = SimpleRouter(trailing_slash=False)
 router.register("", CitizenReportViewSet, basename="reports")
 
-urlpatterns = router.urls
+urlpatterns = [
+    path("s3/presigned-url/", S3PresignedURLView.as_view(), name="s3_presigned_url"),
+]
+
+urlpatterns += router.urls
