@@ -19,7 +19,7 @@ def haversine(lat1, lon1, lat2, lon2):
 
 
 class KakaoProxyViewSet(viewsets.ViewSet):
-    
+
     @action(detail=False, methods=["get"], url_path="kakao/geocode")
     def geocode(self, request):
         query = request.query_params.get("query")
@@ -99,33 +99,38 @@ class KakaoProxyViewSet(viewsets.ViewSet):
                         path.append([v[i+1], v[i]])
             return path
 
-        # 차량 경로
+        def filter_safe_path(path):
+            if not avoid_incidents:
+                return path
+            incidents = RecoveryIncident.objects.filter(status__in=avoid_status)
+            safe_path = []
+            for lat, lng in path:
+                too_close = False
+                for inc in incidents:
+                    dist = haversine(lat, lng, float(inc.lat), float(inc.lng))
+                    if dist <= avoid_radius_m:
+                        too_close = True
+                        break
+                if not too_close:
+                    safe_path.append([lat, lng])
+                else:
+                    # 사고 반경 근처는 건너뛰되 앞뒤 경로는 유지하게끔 로직 변경
+                    if safe_path and safe_path[-1] != [lat, lng]:
+                        safe_path.append(safe_path[-1])
+            return safe_path or path
+        
         try:
             car_url = f"{settings.KAKAO_API_BASE}/v1/directions"
             car_params = {
                 "origin": f"{origin['lng']},{origin['lat']}",
-                "destination": f"{destination['lng']},{destination['lat']}",
+                "destination": f"{destination['lng']},{destination['lat']}"
             }
             car_resp = requests.get(car_url, headers=headers, params=car_params, timeout=settings.KAKAO_TIMEOUT)
             car_resp.raise_for_status()
             car_data = car_resp.json()
 
             car_path = extract_path(car_data)
-
-            # 사고 회피 처리
-            if avoid_incidents:
-                incidents = RecoveryIncident.objects.filter(status__in=avoid_status)
-                safe_path = []
-                for lat, lng in car_path:
-                    too_close = False
-                    for inc in incidents:
-                        dist = haversine(lat, lng, float(inc.lat), float(inc.lng))
-                        if dist <= avoid_radius_m:
-                            too_close = True
-                            break
-                    if not too_close:
-                        safe_path.append([lat, lng])
-                car_path = safe_path
+            car_path = filter_safe_path(car_path)
 
             car_summary = car_data.get("routes", [])[0].get("summary", {})
             routes.append({
@@ -137,33 +142,18 @@ class KakaoProxyViewSet(viewsets.ViewSet):
         except Exception as e:
             return Response({"status": "error", "message": "차량 경로 계산 실패", "code": 502, "data": {"detail": str(e)}}, status=502)
 
-        # 도보 경로
         try:
             walk_url = f"{settings.KAKAO_API_BASE}/v1/directions/walk"
             walk_params = {
                 "origin": f"{origin['lng']},{origin['lat']}",
-                "destination": f"{destination['lng']},{destination['lat']}",
+                "destination": f"{destination['lng']},{destination['lat']}"
             }
             walk_resp = requests.get(walk_url, headers=headers, params=walk_params, timeout=settings.KAKAO_TIMEOUT)
             walk_resp.raise_for_status()
             walk_data = walk_resp.json()
 
             walk_path = extract_path(walk_data)
-
-            # 사고 회피 처리
-            if avoid_incidents:
-                incidents = RecoveryIncident.objects.filter(status__in=avoid_status)
-                safe_path = []
-                for lat, lng in walk_path:
-                    too_close = False
-                    for inc in incidents:
-                        dist = haversine(lat, lng, float(inc.lat), float(inc.lng))
-                        if dist <= avoid_radius_m:
-                            too_close = True
-                            break
-                    if not too_close:
-                        safe_path.append([lat, lng])
-                walk_path = safe_path
+            walk_path = filter_safe_path(walk_path)
 
             walk_summary = walk_data.get("routes", [])[0].get("summary", {})
             routes.append({
