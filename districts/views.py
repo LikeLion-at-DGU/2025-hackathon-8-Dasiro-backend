@@ -249,26 +249,36 @@ class DistrictViewSet(viewsets.ViewSet):
 
         incidents = (
             RecoveryIncident.objects
-            .values("status", gu_code=F("district_id")/1000)  # district_id 앞 5자리 = 구코드
+            .values("status", "district_id")
             .annotate(count=Count("id"))
         )
 
         gu_data = {}
         for row in incidents:
-            gu_code = int(str(row["gu_code"])[:5])
+            district_id = row.get("district_id")
+            if not district_id:
+                continue
+
+            try:
+                gu_code = int(str(district_id)[:5])
+            except (ValueError, TypeError):
+                continue
+
             status_name = row["status"]
             count = row["count"]
 
             if gu_code not in gu_data:
                 gu_data[gu_code] = {"RECOVERING": 0, "TEMP_REPAIRED": 0, "RECOVERED": 0}
 
-            gu_data[gu_code][status_name] = count
+            if status_name in gu_data[gu_code]:
+                gu_data[gu_code][status_name] = count
 
         results = []
         for gu_code, counts in gu_data.items():
             gu_districts = District.objects.filter(id__startswith=str(gu_code))
             if not gu_districts.exists():
                 continue
+
             avg_lat = sum(float(d.center_lat) for d in gu_districts) / gu_districts.count()
             avg_lng = sum(float(d.center_lng) for d in gu_districts) / gu_districts.count()
             first = gu_districts.first()
@@ -288,6 +298,7 @@ class DistrictViewSet(viewsets.ViewSet):
             "code": 200,
             "data": {"items": results, "count": len(results)}
         })
+
         
 class SafezoneViewSet(viewsets.ViewSet):
 
