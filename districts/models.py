@@ -23,7 +23,7 @@ class DistrictMetric(models.Model):
     as_of_date = models.DateField()
     total_grade = models.CharField(max_length=2, choices=RiskGrade.choices)
 
-    ground_stability = models.CharField(max_length=2, choices=RiskGrade.choices)   # 지반 안정성
+    ground_stability = models.CharField(max_length=2, choices=RiskGrade.choices)   # 지반 안정성(굴착공사현장)
     groundwater_impact = models.CharField(max_length=2, choices=RiskGrade.choices) # 지하수 영향
     underground_density = models.CharField(max_length=2, choices=RiskGrade.choices) # 지하 구조물 밀집도
     old_building_dist = models.CharField(max_length=2, choices=RiskGrade.choices)  # 노후 건물 분포

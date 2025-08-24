@@ -4,8 +4,8 @@ from .models import RecoveryIncident
 
 @admin.register(RecoveryIncident)
 class RecoveryIncidentAdmin(admin.ModelAdmin):
-    list_display = ('address', 'status', 'occurred_at', 'created_at', 'image_preview')
-    list_filter = ('status', 'occurred_at')
+    list_display = ('address', 'status', 'occurred_at', 'created_at', 'image_preview', 'district')
+    list_filter = ('status', 'occurred_at', 'district')
     search_fields = ('address', 'cause', 'method')
 
     def image_preview(self, obj):
