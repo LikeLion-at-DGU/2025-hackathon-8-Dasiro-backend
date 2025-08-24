@@ -1,12 +1,9 @@
-import csv
-import os
 import openai
 from django.db.models import Count, F
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
-from incidents.models import RecoveryIncident
-from collections import defaultdict
+from incidents.models import *
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -16,32 +13,21 @@ from incidents.models import *
 from django.db.models import Max
 
 
-
-# 등급 임시 매핑용
-grade_map = {
-    11110515: "G4", # 청운효자동
-    11110530: "G2", # 사직동
-    # ...
-}
-
-
 class DistrictViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["get"], url_path="gu/metrics")
     def gu_metrics(self, request):
-        latest_date = DistrictMetric.objects.aggregate(latest=Max("as_of_date"))["latest"]
-        qs = DistrictMetric.objects.filter(as_of_date=latest_date).select_related("district")
+        latest_date = GuMetric.objects.aggregate(latest=Max("as_of_date"))["latest"]
+        qs = GuMetric.objects.filter(as_of_date=latest_date)
 
         data = [
             {
-                "gu_code": int(str(d.district.id)[:5]),  # 동코드 앞 5자리 → 구코드로 변환 시킴
-                "sido": d.district.sido,
-                "sigungu": d.district.sigungu,
-                "center_lat": float(d.district.center_lat),
-                "center_lng": float(d.district.center_lng),
-                "total_grade": d.total_grade,
+                "sigungu": m.sigungu,
+                "sido": m.sido,
+                "final_grade": m.total_grade,
+                "as_of_date": m.as_of_date,
             }
-            for d in qs
+            for m in qs
         ]
 
         return Response({
@@ -148,8 +134,6 @@ class DistrictViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"], url_path="gu/metrics/by-grade")
     def gu_metrics_by_grade(self, request):
         grade = request.GET.get("grade")
-        match_rule = request.GET.get("match_rule", "any")
-
         if grade not in ["G1", "G2", "G3", "G4", "G5"]:
             return Response({
                 "status": "error",
@@ -158,48 +142,24 @@ class DistrictViewSet(viewsets.ViewSet):
                 "data": {"detail": "grade must be one of G1..G5"}
             }, status=400)
 
-        csv_path = os.path.join(settings.BASE_DIR, "data", "서울시행정동.csv")
-        gu_data = defaultdict(list)
+        latest_date = GuMetric.objects.aggregate(latest=Max("as_of_date"))["latest"]
+        qs = GuMetric.objects.filter(as_of_date=latest_date, total_grade=grade)
 
-        with open(csv_path, newline='', encoding="utf-8") as f:
-            reader = csv.reader(f)
-            next(reader)
-            for row in reader:
-                dong_code = int(row[0])
-                sido = row[1]
-                sigungu = row[2]
-                dong = row[3]
-                lng = float(row[4])
-                lat = float(row[5])
-
-                dong_grade = grade_map.get(dong_code)
-                if dong_grade:
-                    gu_code = int(str(dong_code)[:5])
-                    gu_data[(gu_code, sido, sigungu)].append((lat, lng, dong_grade))
-
-        results = []
-        for (gu_code, sido, sigungu), records in gu_data.items():
-            avg_lat = sum(r[0] for r in records) / len(records)
-            avg_lng = sum(r[1] for r in records) / len(records)
-            grade_nums = [int(r[2][1]) for r in records]  # G1 → 1, G5 → 5로 숫자 매칭함
-            avg_grade = sum(grade_nums) / len(grade_nums)
-            final_grade = f"G{round(avg_grade)}"
-
-            results.append({
-                "gu_code": gu_code,
-                "sido": sido,
-                "sigungu": sigungu,
-                "center_lat": round(avg_lat, 6),
-                "center_lng": round(avg_lng, 6),
-                "matching_district_count": len(records),
-                "final_grade": final_grade,
-            })
+        data = [
+            {
+                "sigungu": m.sigungu,
+                "sido": m.sido,
+                "total_grade": m.total_grade,
+                "as_of_date": m.as_of_date,
+            }
+            for m in qs
+        ]
 
         return Response({
             "status": "success",
             "message": "구 등급 필터 조회 성공",
             "code": 200,
-            "data": {"items": results, "as_of_date": "2025-08-01", "count": len(results)}
+            "data": {"items": data, "as_of_date": latest_date, "count": len(data)}
         })
 
     @action(detail=False, methods=["get"], url_path="by-grade")
@@ -213,37 +173,29 @@ class DistrictViewSet(viewsets.ViewSet):
                 "data": {"detail": "grade must be one of G1..G5"}
             }, status=400)
 
-        csv_path = os.path.join(settings.BASE_DIR, "data", "서울시행정동.csv")
-        data = []
+        latest_date = DistrictMetric.objects.aggregate(latest=Max("as_of_date"))["latest"]
+        qs = DistrictMetric.objects.filter(as_of_date=latest_date, total_grade=grade).select_related("district")
 
-        with open(csv_path, newline='', encoding="utf-8") as f:
-            reader = csv.reader(f)
-            next(reader)
-            for row in reader:
-                dong_code = int(row[0])
-                sido = row[1]
-                sigungu = row[2]
-                dong = row[3]
-                lng = float(row[4])
-                lat = float(row[5])
-
-                if grade_map.get(dong_code) == grade:
-                    data.append({
-                        "id": dong_code,
-                        "sido": sido,
-                        "sigungu": sigungu,
-                        "dong": dong,
-                        "center_lat": lat,
-                        "center_lng": lng,
-                    })
+        data = [
+            {
+                "id": m.district.id,
+                "sido": m.district.sido,
+                "sigungu": m.district.sigungu,
+                "dong": m.district.dong,
+                "center_lat": float(m.district.center_lat),
+                "center_lng": float(m.district.center_lng),
+                "total_grade": m.total_grade,
+            }
+            for m in qs
+        ]
 
         return Response({
             "status": "success",
-            "message": "동 등급 필터 조회 성공",
+            "message": f"{grade} 등급 동 조회 성공",
             "code": 200,
-            "data": {"items": data, "as_of_date": "2025-08-01", "count": len(data)}
+            "data": {"items": data, "as_of_date": latest_date, "count": len(data)}
         })
-        
+
     @action(detail=False, methods=["get"], url_path="gu/recovery-status")
     def gu_recovery_status(self, request):
 
@@ -299,10 +251,9 @@ class DistrictViewSet(viewsets.ViewSet):
             "data": {"items": results, "count": len(results)}
         })
 
-        
 class SafezoneViewSet(viewsets.ViewSet):
 
-    def _latest_metrics(self): # 최신 스냅샷으로 변경 -> 최근 날짜것 불러오기 !
+    def _latest_metrics(self):
         latest_date = DistrictMetric.objects.aggregate(latest=Max("as_of_date"))["latest"]
         if not latest_date:
             return None, None
@@ -314,7 +265,7 @@ class SafezoneViewSet(viewsets.ViewSet):
         return qs, latest_date
 
     def _is_safe_district(self, metric: DistrictMetric):
-        return (metric.total_grade in ("G1", "G2")) or bool(metric.district.is_safezone)
+        return metric.total_grade == "G1"
 
     @action(detail=False, methods=["get"], url_path="gu")
     def gu_summary(self, request):
@@ -331,11 +282,8 @@ class SafezoneViewSet(viewsets.ViewSet):
         for m in metrics:
             if self._is_safe_district(m):
                 gu_code = int(str(m.district.id)[:5])
-                info = safe_gu_info.setdefault(gu_code, {"grades": set(), "manual": False})
-                if m.total_grade in ("G1", "G2"):
-                    info["grades"].add(m.total_grade)
-                if m.district.is_safezone:
-                    info["manual"] = True
+                info = safe_gu_info.setdefault(gu_code, {"grades": set()})
+                info["grades"].add(m.total_grade)
 
         results = []
         for gu_code, info in safe_gu_info.items():
@@ -346,21 +294,14 @@ class SafezoneViewSet(viewsets.ViewSet):
             avg_lat = sum(float(d.center_lat) for d in gu_districts) / gu_districts.count()
             avg_lng = sum(float(d.center_lng) for d in gu_districts) / gu_districts.count()
 
-            if "G1" in info["grades"]:
-                final_grade = "G1"
-            elif "G2" in info["grades"] or info["manual"]:
-                final_grade = "G2"
-            else:
-                final_grade = "G2"
-
             results.append({
                 "gu_code": gu_code,
                 "sido": gu_districts.first().sido,
                 "sigungu": gu_districts.first().sigungu,
                 "center_lat": round(avg_lat, 6),
                 "center_lng": round(avg_lng, 6),
-                "safe_district_count": gu_districts.count(),  # 구 전체 동 개수로 줌
-                "final_grade": final_grade,  # G1/G2 구분함 !
+                "safe_district_count": gu_districts.count(),  # 구 전체 동 개수
+                "final_grade": "G1",  # 무조건 G1
             })
 
         return Response({
@@ -372,7 +313,6 @@ class SafezoneViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["get"], url_path="districts")
     def safe_districts(self, request):
-
         metrics, latest_date = self._latest_metrics()
         if latest_date is None:
             return Response({
@@ -394,21 +334,9 @@ class SafezoneViewSet(viewsets.ViewSet):
                     "dong": m.district.dong,
                     "center_lat": float(m.district.center_lat),
                     "center_lng": float(m.district.center_lng),
-                    "total_grade": m.total_grade if m.total_grade in ("G1", "G2") else "G2"
+                    "total_grade": "G1"
                 })
                 seen_ids.add(m.district_id)
-
-        manual_safe = District.objects.filter(is_safezone=True).exclude(id__in=seen_ids)
-        for d in manual_safe:
-            safe_items.append({
-                "id": d.id,
-                "sido": d.sido,
-                "sigungu": d.sigungu,
-                "dong": d.dong,
-                "center_lat": float(d.center_lat),
-                "center_lng": float(d.center_lng),
-                "total_grade": "G2",
-            })
 
         return Response({
             "status": "success",
@@ -416,7 +344,7 @@ class SafezoneViewSet(viewsets.ViewSet):
             "code": 200,
             "data": {"items": safe_items, "as_of_date": str(latest_date), "count": len(safe_items)}
         })
-        
+
 class DistrictRiskViewSet(viewsets.ViewSet):
 
     def _generate_gpt_analysis(self, district, incidents):
