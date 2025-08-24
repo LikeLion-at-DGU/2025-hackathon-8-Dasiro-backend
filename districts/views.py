@@ -92,7 +92,7 @@ class DistrictViewSet(viewsets.ViewSet):
                     "center_lat": float(d.center_lat),
                     "center_lng": float(d.center_lng),
                     "is_safezone": d.is_safezone,
-                    "total_grade": None,e
+                    "total_grade": None,
                     "ground_stability": None,
                     "groundwater_impact": None,
                     "underground_density": None,
