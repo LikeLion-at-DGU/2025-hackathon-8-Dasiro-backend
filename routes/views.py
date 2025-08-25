@@ -209,11 +209,10 @@ class ORSProxyViewSet(viewsets.ViewSet):
         body = {
             "coordinates": [
                 [float(origin["lng"]), float(origin["lat"])],
-                [float(destination["lng"]), float(destination["lat"])],
+                [float(destination["lng"]), float(destination["lat"])]
             ],
             "elevation": True,
-            "geometry": True,
-            "format": "geojson"
+            "geometry": True
         }
         if avoid_polygons:
             body["avoid_polygons"] = avoid_polygons
@@ -235,7 +234,6 @@ class ORSProxyViewSet(viewsets.ViewSet):
             summary = feature.get("properties", {}).get("summary", {})
             geometry_data = feature.get("geometry", {})
 
-            # 고도(elevation) 값이 포함되어 있어도 lat/lng만 추출하게끔 변경
             polyline = []
             for coord in geometry_data.get("coordinates", []):
                 if len(coord) >= 2:
