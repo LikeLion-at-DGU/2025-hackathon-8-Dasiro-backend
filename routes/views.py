@@ -212,7 +212,7 @@ class ORSProxyViewSet(viewsets.ViewSet):
                 [float(destination["lng"]), float(destination["lat"])]
             ],
             "elevation": True,
-            "geometry": True
+            "instructions": False
         }
         if avoid_polygons:
             body["avoid_polygons"] = avoid_polygons
