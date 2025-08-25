@@ -192,9 +192,10 @@ class ORSProxyViewSet(viewsets.ViewSet):
         url = f"{settings.ORS_BASE}/v2/directions/foot-walking/geojson"
         headers = {
             "Authorization": settings.ORS_API_KEY,
-            "Content-Type": "application/json; charset=utf-8"
+            "Content-Type": "application/json"
         }
 
+        # 회피 영역 생성
         avoid_polygons = None
         if avoid_incidents:
             incidents = RecoveryIncident.objects.filter(status__in=avoid_status)
@@ -206,16 +207,16 @@ class ORSProxyViewSet(viewsets.ViewSet):
                     "coordinates": [p["coordinates"] for p in polygons]
                 }
 
+        # 요청 바디
         body = {
             "coordinates": [
                 [float(origin["lng"]), float(origin["lat"])],
                 [float(destination["lng"]), float(destination["lat"])]
             ],
-            "elevation": True,
-            "instructions": False
+            "elevation": True
         }
         if avoid_polygons:
-            body["avoid_polygons"] = avoid_polygons
+            body["options"] = {"avoid_polygons": avoid_polygons}
 
         try:
             r = requests.post(url, headers=headers, json=body, timeout=settings.ORS_TIMEOUT)
@@ -234,12 +235,14 @@ class ORSProxyViewSet(viewsets.ViewSet):
             summary = feature.get("properties", {}).get("summary", {})
             geometry_data = feature.get("geometry", {})
 
+            # GeoJSON geometry → lat/lng 변환
             polyline = []
             for coord in geometry_data.get("coordinates", []):
                 if len(coord) >= 2:
                     lng, lat = coord[0], coord[1]
                     polyline.append([lat, lng])
 
+            # 로그 저장
             RouteLog.objects.create(
                 origin_lat=float(origin["lat"]),
                 origin_lng=float(origin["lng"]),
