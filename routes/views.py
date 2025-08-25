@@ -198,10 +198,8 @@ class ORSProxyViewSet(viewsets.ViewSet):
         avoid_polygons = None
         if avoid_incidents:
             incidents = RecoveryIncident.objects.filter(status__in=avoid_status)
-            polygons = [
-                make_circle_polygon(float(inc.lat), float(inc.lng), avoid_radius_m)
-                for inc in incidents
-            ]
+            polygons = [make_circle_polygon(float(inc.lat), float(inc.lng), avoid_radius_m)
+                        for inc in incidents]
             if polygons:
                 avoid_polygons = {
                     "type": "MultiPolygon",
@@ -213,7 +211,8 @@ class ORSProxyViewSet(viewsets.ViewSet):
                 [float(origin["lng"]), float(origin["lat"])],
                 [float(destination["lng"]), float(destination["lat"])]
             ],
-            "elevation": True
+            "elevation": True,
+            "instructions": False
         }
         if avoid_polygons:
             body["avoid_polygons"] = avoid_polygons
@@ -233,9 +232,13 @@ class ORSProxyViewSet(viewsets.ViewSet):
 
             feature = data["features"][0]
             summary = feature.get("properties", {}).get("summary", {})
-            coords = feature.get("geometry", {}).get("coordinates", [])
+            geometry_data = feature.get("geometry", {})
 
-            polyline = [[lat, lng] for lng, lat, *_ in coords if len(coords) >= 2]
+            polyline = []
+            for coord in geometry_data.get("coordinates", []):
+                if len(coord) >= 2:
+                    lng, lat = coord[0], coord[1]
+                    polyline.append([lat, lng])
 
             RouteLog.objects.create(
                 origin_lat=float(origin["lat"]),
