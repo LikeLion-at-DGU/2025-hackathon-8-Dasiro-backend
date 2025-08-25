@@ -1,5 +1,5 @@
 import openai
-from django.db.models import Count, F
+from django.db.models import Count, F, Q
 from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
@@ -434,9 +434,9 @@ class DistrictRiskViewSet(viewsets.ViewSet):
 
         return first_paragraph + "\n\n" + gpt_text
 
+
     @action(detail=False, methods=["get", "post"], url_path="risk-info")
     def risk_info_by_dong(self, request):
-
         dong = request.query_params.get("dong") or request.data.get("dong")
 
         if not dong:
@@ -446,28 +446,25 @@ class DistrictRiskViewSet(viewsets.ViewSet):
         if not district:
             return Response({"status": "error", "message": "동 없음", "code": 404, "data": {}}, status=404)
 
-        two_years_ago = timezone.now().date() - timedelta(days=730)
         incidents = RecoveryIncident.objects.filter(
-            district=district,
-            occurred_at__gte=two_years_ago
+            district=district
         ).order_by("-occurred_at")
 
         latest = DistrictMetric.objects.filter(district=district).order_by("-as_of_date").first()
         if not latest:
             return Response({"status": "error", "message": "지표 없음", "code": 404, "data": {}}, status=404)
 
-        # 싱크홀 사고 이력 없는 경우 → 0건으로 안내 후, 다르게 2/3문단 구성
         if not incidents.exists():
-            first_paragraph = f"{district.dong}은 최근 2년간 싱크홀 사고가 0건으로 발생하지 않은 지역이에요. 현재까지는 특별히 위험 징후가 확인되지 않았어요."
+            first_paragraph = f"{district.dong}은 2년 이내에 싱크홀 사고가 발생하지 않은 지역이에요. 현재까지는 특별히 위험 징후가 확인되지 않았어요."
 
             prompt = f"""
             행정동: {district.dong}
             시군구: {district.sigungu}
-            최근 2년간 싱크홀 사고 건수: 0건
+            싱크홀 사고 건수: 0건
 
             위 데이터를 기반으로,
             안내문 형식으로 2번째와 3번째 문단을 작성해줘.
-            - 2번째 문단: 최근 사고가 없는 지역의 특성을 설명하고, 지반·시설·공사 측면에서 안정적일 수 있음을 언급
+            - 2번째 문단: 사고가 없는 지역의 특성을 설명하고, 지반·시설·공사 측면에서 안정적일 수 있음을 언급
             - 3번째 문단: 앞으로도 주의 깊은 관리가 필요하지만 현재는 비교적 안전하다는 내용을 설명
             - 반드시 '~에요, ~돼요, ~해져요' 같은 구어체 설명 문장으로만 작성해
             - '~입니다', '~합니다' 같은 격식체 표현은 절대 쓰지 마
@@ -507,7 +504,7 @@ class DistrictRiskViewSet(viewsets.ViewSet):
                 }
             })
 
-        # 싱크홀 사고 이력 있는 경우 → 기존 로직 유지
+        # 사고가 있는 경우 (집계 반영)
         if latest.analysis_text:
             gpt_analysis = latest.analysis_text
         else:
@@ -526,7 +523,7 @@ class DistrictRiskViewSet(viewsets.ViewSet):
                 "dong": district.dong,
                 "as_of_date": latest.as_of_date,
                 "total_grade": latest.total_grade,
-                "recent_incidents": incidents.count(),
+                "recent_incidents": incidents.count(),   # 전체 건수
                 "analysis_text": gpt_analysis
             }
         })
