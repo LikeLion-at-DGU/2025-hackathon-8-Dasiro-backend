@@ -448,7 +448,7 @@ class DistrictRiskViewSet(viewsets.ViewSet):
 
         two_years_ago = timezone.now().date() - timedelta(days=730)
         incidents = RecoveryIncident.objects.filter(
-            address__icontains=district.dong,
+            district=district,
             occurred_at__gte=two_years_ago
         ).order_by("-occurred_at")
 
